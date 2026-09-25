@@ -114,6 +114,7 @@
                     <!-- Matrix Legend -->
                     <div class="matrix-legend">
                         <div class="legend-item"><span class="legend-box free"></span> Free</div>
+                        <div class="legend-item"><span class="legend-box preview"></span> Typing Preview</div>
                         <div class="legend-item"><span class="legend-box active"></span> Private (Active)</div>
                         <div class="legend-item"><span class="legend-box shared"></span> Shared Prefix (CoW)</div>
                         <div class="legend-item"><span class="legend-box pressure"></span> Preemption Alert</div>
@@ -164,13 +165,41 @@
 
                 <!-- Textarea -->
                 <div class="prompt-input-wrapper">
-                    <textarea id="promptInput" rows="3" placeholder="Enter prompt instructions or query..."></textarea>
-                    <button class="btn btn-generate" id="btnSubmitPrompt">
-                        <span>Send Request</span>
-                        <svg class="send-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path d="M5 12h14M12 5l7 7-7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </button>
+                    <textarea id="promptInput" rows="3" placeholder="Enter prompt instructions or query... (Real-time memory estimation updates as you type)"></textarea>
+                    <div class="prompt-action-bar">
+                        <span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
+                        <button class="btn btn-generate" id="btnSubmitPrompt">
+                            <span>Send Request</span>
+                            <svg class="send-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M5 12h14M12 5l7 7-7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Real-Time Typing Memory Estimator HUD -->
+                <div class="live-typing-hud" id="liveTypingHud">
+                    <div class="hud-item">
+                        <span class="hud-dot live-pulse"></span>
+                        <span class="hud-label">LIVE TOKENS:</span>
+                        <span class="hud-val" id="liveTokenCount">0</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-icon">📦</span>
+                        <span class="hud-label">BLOCKS:</span>
+                        <span class="hud-val" id="liveBlockCount">0</span>
+                        <span class="hud-sub">(16/blk)</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-icon">⚡</span>
+                        <span class="hud-label">PREFIX:</span>
+                        <span class="hud-badge badge-cold" id="livePrefixStatus">COLD</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-icon">🧩</span>
+                        <span class="hud-label">TRAILING:</span>
+                        <span class="hud-val" id="liveTrailingFill">0/16 (0%)</span>
+                    </div>
                 </div>
 
                 <!-- Output Terminal View -->
