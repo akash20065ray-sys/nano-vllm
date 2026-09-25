@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MicroServe-LLM | GPU VRAM Systems Observability Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Top System Telemetry Navigation Bar -->
+    <header class="app-header">
+        <div class="header-branding">
+            <div class="nvidia-badge">
+                <span class="pulse-dot"></span>
+                <span class="badge-text">NVIDIA HARDWARE ACCELERATED</span>
+            </div>
+            <h1>MicroServe-LLM <span class="header-sub">| Systems Observability & VRAM Matrix</span></h1>
+        </div>
+
+        <div class="header-controls">
+            <div class="system-chip" id="deviceChip">
+                <span class="chip-label">DEVICE:</span>
+                <span class="chip-val" id="deviceVal">CUDA:0 (RTX 3050)</span>
+            </div>
+            <div class="system-chip">
+                <span class="chip-label">BLOCK SIZE:</span>
+                <span class="chip-val" id="blockSizeVal">16 Tokens</span>
+            </div>
+            <div class="status-indicator online" id="serverStatus">
+                <span class="indicator-dot"></span>
+                <span class="indicator-text">ENGINE ACTIVE</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Mission Control Grid -->
+    <main class="dashboard-container">
+        <!-- Top Metrics Telemetry Row -->
+        <section class="telemetry-bar">
+            <div class="metric-card" id="cardTTFT">
+                <div class="metric-header">
+                    <span class="metric-title">TIME TO FIRST TOKEN (TTFT)</span>
+                    <span class="metric-tag tag-compute">PREFILL</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value" id="valTTFT">--</span>
+                    <span class="metric-unit">ms</span>
+                </div>
+                <div class="metric-footer" id="subTTFT">Prefix hit: 0ms compute</div>
+            </div>
+
+            <div class="metric-card" id="cardITL">
+                <div class="metric-header">
+                    <span class="metric-title">INTER-TOKEN LATENCY (ITL)</span>
+                    <span class="metric-tag tag-memory">DECODE</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value" id="valITL">--</span>
+                    <span class="metric-unit">ms</span>
+                </div>
+                <div class="metric-footer" id="subITL">Memory-bandwidth bound</div>
+            </div>
+
+            <div class="metric-card" id="cardTPS">
+                <div class="metric-header">
+                    <span class="metric-title">TOTAL THROUGHPUT</span>
+                    <span class="metric-tag tag-green">SPEED</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value" id="valTPS">0.0</span>
+                    <span class="metric-unit">tok/s</span>
+                </div>
+                <div class="metric-footer" id="subTPS">Active generation rate</div>
+            </div>
+
+            <div class="metric-card" id="cardFrag">
+                <div class="metric-header">
+                    <span class="metric-title">INTERNAL FRAGMENTATION</span>
+                    <span class="metric-tag tag-savings">EFFICIENCY</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value" id="valFrag">0.0</span>
+                    <span class="metric-unit">%</span>
+                </div>
+                <div class="metric-footer" id="subFrag">Only trailing block slots</div>
+            </div>
+
+            <div class="metric-card" id="cardVRAM">
+                <div class="metric-header">
+                    <span class="metric-title">VRAM UTILIZATION</span>
+                    <span class="metric-tag tag-blue">CAPACITY</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value" id="valVRAM">0 / 128</span>
+                    <span class="metric-unit">blocks</span>
+                </div>
+                <div class="metric-footer" id="subVRAM">0.0% allocated</div>
+            </div>
+        </section>
+
+        <!-- Center Workspace: VRAM Matrix on Left, Live Prompt & Stream on Right -->
+        <div class="workspace-grid">
+            <!-- Left: Real-time VRAM Physical Block Matrix -->
+            <section class="panel-vram-matrix">
+                <div class="panel-header">
+                    <div class="panel-title-group">
+                        <h2>GPU Physical Memory Matrix</h2>
+                        <span class="panel-subtitle">128 Physical Blocks | 2,048 Token Capacity</span>
+                    </div>
+
+                    <!-- Matrix Legend -->
+                    <div class="matrix-legend">
+                        <div class="legend-item"><span class="legend-box free"></span> Free</div>
+                        <div class="legend-item"><span class="legend-box active"></span> Private (Active)</div>
+                        <div class="legend-item"><span class="legend-box shared"></span> Shared Prefix (CoW)</div>
+                        <div class="legend-item"><span class="legend-box pressure"></span> Preemption Alert</div>
+                    </div>
+                </div>
+
+                <!-- 2D Block Matrix Grid Canvas Container -->
+                <div class="matrix-scroll-wrapper">
+                    <div class="matrix-grid" id="vramGrid">
+                        <!-- 128 Physical Block Cells Dynamically Generated by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- Interactive Failure-Injection & Experimentation Toolbar -->
+                <div class="experiment-toolbar">
+                    <button class="btn btn-outline" id="btnSharedPrefix">
+                        <span class="btn-icon">⚡</span> Test Prefix Cache Hit
+                    </button>
+                    <button class="btn btn-warning" id="btnStressPressure">
+                        <span class="btn-icon">🔥</span> Simulate VRAM Exhaustion
+                    </button>
+                    <button class="btn btn-secondary" id="btnReclaimAll">
+                        <span class="btn-icon">🧹</span> Free All Memory
+                    </button>
+                    <button class="btn btn-primary" id="btnRunBenchmark">
+                        <span class="btn-icon">📊</span> Run Quick Benchmark
+                    </button>
+                </div>
+            </section>
+
+            <!-- Right: Live Token Streamer & Prompt Console -->
+            <section class="panel-streamer">
+                <div class="panel-header">
+                    <h2>Live Inference Streamer</h2>
+                    <span class="badge-mode" id="engineModeBadge">MODE: REAL-TIME SERVER</span>
+                </div>
+
+                <!-- Prompt Preset Selector -->
+                <div class="preset-selector-group">
+                    <label for="promptPreset">Prompt Preset:</label>
+                    <select id="promptPreset" class="dropdown-presets">
+                        <option value="vit_syllabus">VIT Pune Syllabus Query (Shared Prefix)</option>
+                        <option value="code_kernel">Write CUDA Matrix Multiplication Kernel</option>
+                        <option value="explain_paging">Explain PagedAttention Memory Architecture</option>
+                        <option value="custom">Custom Prompt...</option>
+                    </select>
+                </div>
+
+                <!-- Textarea -->
+                <div class="prompt-input-wrapper">
+                    <textarea id="promptInput" rows="3" placeholder="Enter prompt instructions or query..."></textarea>
+                    <button class="btn btn-generate" id="btnSubmitPrompt">
+                        <span>Send Request</span>
+                        <svg class="send-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M5 12h14M12 5l7 7-7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Output Terminal View -->
+                <div class="stream-terminal-container">
+                    <div class="terminal-titlebar">
+                        <div class="terminal-dots">
+                            <span class="dot red"></span>
+                            <span class="dot yellow"></span>
+                            <span class="dot green"></span>
+                        </div>
+                        <span class="terminal-label" id="terminalStatus">Awaiting prompt input...</span>
+                        <span class="terminal-speed" id="streamSpeedHud">0 tok/s</span>
+                    </div>
+                    <div class="terminal-output" id="terminalOutput">
+                        <span class="placeholder-text">Generated tokens will stream here in real time...</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Bottom: "Why Did My Request Slow Down?" Request Diagnostics Inspector -->
+        <section class="panel-diagnostics">
+            <div class="panel-header">
+                <div class="panel-title-group">
+                    <h2>"Why Did My Request Slow Down?" | Request Diagnostics Inspector</h2>
+                    <span class="panel-subtitle">Per-sequence latency breakdowns, cache hit attribution, and preemption logs</span>
+                </div>
+                <div class="filter-group">
+                    <button class="filter-tab active" id="tabAllReqs">All Requests</button>
+                    <button class="filter-tab" id="tabActiveReqs">Running Only</button>
+                    <button class="filter-tab" id="tabPreemptedReqs">Preempted</button>
+                </div>
+            </div>
+
+            <!-- Diagnostics Table -->
+            <div class="table-wrapper">
+                <table class="diagnostics-table" id="diagTable">
+                    <thead>
+                        <tr>
+                            <th>Seq ID</th>
+                            <th>Status</th>
+                            <th>Prompt Tokens</th>
+                            <th>Generated</th>
+                            <th>Queue Latency</th>
+                            <th>TTFT</th>
+                            <th>Mean ITL</th>
+                            <th>Prefix Cache</th>
+                            <th>Preempted</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="diagTableBody">
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal for Detailed Request Block Map Inspection -->
+    <div class="modal-overlay hidden" id="blockModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modalTitle">Physical Block #14 Metadata</h3>
+                <button class="modal-close" id="modalCloseBtn">&times;</button>
+            </div>
+            <div class="modal-body" id="modalContent">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
