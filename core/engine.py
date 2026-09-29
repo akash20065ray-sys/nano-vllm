@@ -3,29 +3,32 @@ import torch
 from typing import Dict, Any, List, Optional, Tuple, Generator
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 
-from core.block_manager import BlockAllocator
+from core.block_manager import BlockAllocator, MemoryTier
 from core.page_table import PageTable
 from core.prefix_cache import PrefixCache
 from core.kv_cache import PagedKVCache
 from core.request import Sequence, SequenceStatus
+from core.scheduler import ContinuousScheduler
 
 class NanoVLLMEngine:
     """
-    Unified Dual-Mode LLM Serving Engine:
+    Unified Dual-Mode LLM Serving Engine with 2-Tier Memory Management:
     - Real Neural Mode: Executes SmolLM-135M-Instruct forward passes, writes real Key/Value
       tensors into physical PagedKVCache blocks, and emits real autoregressive tokens.
     - Fast Simulation Mode: High-throughput synthetic tensor mode for stress-testing
-      100+ concurrent sequences without GPU matrix multiplication bottlenecks.
+      100+ concurrent sequences with Continuous Batching and Tiered GPU ⇄ CPU RAM Swapping.
     """
     def __init__(
         self,
         num_blocks: int = 128,
+        num_cpu_blocks: Optional[int] = None,
         block_size: int = 16,
         model_name: str = "HuggingFaceTB/SmolLM-135M-Instruct",
         device: Optional[str] = None
     ):
         self.block_size = block_size
         self.num_blocks = num_blocks
+        self.num_cpu_blocks = num_cpu_blocks if num_cpu_blocks is not None else num_blocks * 2
         self.model_name = model_name
 
         if device is None:
@@ -33,8 +36,10 @@ class NanoVLLMEngine:
         else:
             self.device = torch.device(device)
 
-        # Core Memory Subsystem
-        self.allocator = BlockAllocator(num_blocks=num_blocks, block_size=block_size)
+        # 2-Tier Physical Block Allocators
+        self.allocator = BlockAllocator(num_blocks=num_blocks, block_size=block_size, tier=MemoryTier.GPU)
+        self.cpu_allocator = BlockAllocator(num_blocks=self.num_cpu_blocks, block_size=block_size, tier=MemoryTier.CPU)
+
         self.prefix_cache = PrefixCache(block_size=block_size)
         self.active_page_tables: Dict[int, PageTable] = {}
         self.active_sequences: Dict[int, Sequence] = {}
@@ -46,6 +51,13 @@ class NanoVLLMEngine:
         self.paged_kv_cache: Optional[PagedKVCache] = None
         self.is_model_loaded = False
 
+        # Continuous Batching Scheduler instance
+        self.scheduler = ContinuousScheduler(
+            num_gpu_blocks=num_blocks,
+            num_cpu_blocks=self.num_cpu_blocks,
+            block_size=block_size
+        )
+
     def load_model_if_needed(self):
         """Lazy loader for SmolLM-135M weights to ensure fast startup"""
         if self.is_model_loaded:
@@ -55,16 +67,18 @@ class NanoVLLMEngine:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         cfg = AutoConfig.from_pretrained(self.model_name)
 
-        # Allocate 5D physical tensor pool matching SmolLM-135M architecture
+        # Allocate 2-tier 5D physical tensor pool matching SmolLM-135M architecture
         # Layers: 30, KV Heads: 3, Head Dim: 64
         self.paged_kv_cache = PagedKVCache(
             num_blocks=self.num_blocks,
+            num_cpu_blocks=self.num_cpu_blocks,
             num_layers=cfg.num_hidden_layers,
             num_heads=cfg.num_key_value_heads,
             head_dim=cfg.hidden_size // cfg.num_attention_heads,
             block_size=self.block_size,
             device=self.device
         )
+        self.scheduler.kv_cache = self.paged_kv_cache
 
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
@@ -74,7 +88,7 @@ class NanoVLLMEngine:
         self.model.to(self.device)
         self.model.eval()
         self.is_model_loaded = True
-        print(f"[Engine] Model loaded. Tensor pool size: {self.paged_kv_cache.total_memory_mb} MB")
+        print(f"[Engine] Model loaded. GPU VRAM: {self.paged_kv_cache.gpu_memory_mb} MB, CPU Swap: {self.paged_kv_cache.cpu_memory_mb} MB")
 
     def generate_real_stream(
         self,
@@ -223,7 +237,7 @@ class NanoVLLMEngine:
     def free_sequence(self, seq_id: int):
         """Reclaims all physical memory blocks owned by a sequence"""
         if seq_id in self.active_page_tables:
-            self.active_page_tables[seq_id].free_all(self.allocator)
+            self.active_page_tables[seq_id].free_all(self.allocator, self.cpu_allocator)
             del self.active_page_tables[seq_id]
         if seq_id in self.active_sequences:
             del self.active_sequences[seq_id]

@@ -6,7 +6,7 @@
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![Transformers](https://img.shields.io/badge/🤗%20HuggingFace-Transformers-yellow.svg)](https://huggingface.co/docs/transformers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 12 Passed](https://img.shields.io/badge/Tests-12%20Passed-brightgreen.svg)]()
+[![Tests: 18 Passed](https://img.shields.io/badge/Tests-18%20Passed-brightgreen.svg)]()
 
 ---
 
@@ -22,7 +22,8 @@ However, standard deep learning serving stacks allocate memory **contiguously** 
 * **Virtual Page Tables:** Maps logical token sequence indices to arbitrary non-contiguous physical blocks in VRAM, eliminating external fragmentation.
 * **Copy-On-Write (CoW) Prefix Sharing:** Shares immutable system prompt blocks across concurrent sessions with atomic reference counts (`ref_count`), duplicating blocks only upon mutation.
 * **Rolling Hash Prefix Cache:** Chained SHA-256 hash tree with LRU eviction for instantaneous Time-To-First-Token (TTFT) on repeated prompts.
-* **Tiered GPU ⇄ Host CPU RAM Swapping (Phase 2):** Virtual memory swap space offloading cold KV blocks to pinned Host RAM via non-blocking DMA, eliminating the consumer GPU OOM cliff.
+* **Tiered GPU ⇄ Host CPU RAM Swapping:** Virtual memory swap space offloading cold KV blocks to pinned Host RAM via non-blocking DMA (`cudaMemcpyAsync`), eliminating the consumer GPU OOM cliff.
+* **Iteration-Level Continuous Batching:** Retires completed sequences and admits queued requests on every individual token step.
 * **Real-Time Observability Matrix:** Cyberpunk 2D physical block visualizer tracking memory states, live keystroke estimation HUD, micro-fill progress bars, and per-request latency diagnostics.
 
 ---
@@ -96,11 +97,12 @@ $$\text{Memory per Token} = 2 \times n_{\text{layers}} \times n_{\text{heads}} \
 ```
 nano-vllm/
 ├── core/
-│   ├── block_manager.py     # PhysicalBlock & O(1) lock-free BlockAllocator
-│   ├── page_table.py        # Logical-to-physical address translation & CoW logic
+│   ├── block_manager.py     # PhysicalBlock & O(1) lock-free BlockAllocator (GPU & CPU tiers)
+│   ├── page_table.py        # Logical-to-physical address translation, CoW & Swap logic
 │   ├── prefix_cache.py      # Chained SHA-256 rolling hash tree & LRU eviction
-│   ├── kv_cache.py          # Unified GPU VRAM / CPU RAM 5D tensor storage pool
+│   ├── kv_cache.py          # Unified 2-tier GPU VRAM / Host CPU RAM 5D tensor pool
 │   ├── request.py           # Sequence state machine & latency instrumentation
+│   ├── scheduler.py         # Iteration-Level Continuous Batching & Tiered Swap Scheduler
 │   └── engine.py            # Real Neural LLM Inference Engine (SmolLM-135M)
 ├── kernels/
 │   └── paged_gather.py      # Vectorized non-contiguous block indexing benchmark
@@ -109,7 +111,7 @@ nano-vllm/
 │   ├── styles.css           # NVIDIA-green cyberpunk dark mode theme
 │   └── app.js               # Real-time state controller, SSE stream & typing HUD
 ├── server/
-│   └── app.py               # FastAPI streaming backend & telemetry API
+│   └── app.py               # FastAPI streaming backend, telemetry & simulation API
 ├── prd/                     # Technical specifications, math formulations & architecture
 │   ├── brain.md             # The memory-wall problem & KV-cache formulation
 │   ├── system_architecture.md # Data flows & state transition tables
@@ -121,6 +123,8 @@ nano-vllm/
 │   ├── test_page_table.py   # Address translation & Copy-On-Write tests
 │   ├── test_prefix_cache.py # Prefix matching & LRU eviction order tests
 │   ├── test_kv_cache.py     # Tensor read/write & paged gather tests
+│   ├── test_tiered_swap.py  # GPU ⇄ Host CPU RAM swap & recovery tests
+│   ├── test_scheduler.py    # Continuous batching lifecycle & preemption tests
 │   └── test_engine.py       # Real neural generation & sequence freeing tests
 ├── run_dashboard.py         # One-click launcher (starts server + opens browser)
 └── requirements.txt         # Core dependencies
@@ -134,11 +138,11 @@ nano-vllm/
 [Phase 1: Memory Foundation] ─────────► COMPLETED (12/12 Tests Passing)
             │
             ▼
-[Phase 2: Tiered Engine & Scheduler] ──► IN PROGRESS
+[Phase 2: Tiered Engine & Scheduler] ──► COMPLETED (18/18 Tests Passing)
             │                            ├── Continuous Batching Loop
             │                            └── Tiered GPU ⇄ CPU RAM Swap
             ▼
-[Phase 3: Empirical Benchmarking] ────► PENDING
+[Phase 3: Empirical Benchmarking] ────► NEXT UP
             │                            ├── Automated 4-Baseline Runner
             │                            └── Publication-Grade Plots
             ▼
@@ -146,8 +150,8 @@ nano-vllm/
 ```
 
 * **Phase 1 (Completed):** Physical block allocator, virtual page tables, Copy-On-Write page duplication, prefix cache hash tree, vectorized paged gather, and live visual dashboard.
-* **Phase 2 (Underway):** Iteration-level continuous batching scheduler, multi-sequence priority queue, and **Tiered GPU ⇄ Host CPU RAM Swapping** to eliminate consumer GPU OOM crashes.
-* **Phase 3 (Pending):** Automated benchmark runner (`benchmark/runner.py`) testing throughput, TTFT latency, and memory fragmentation across Zipfian request distributions.
+* **Phase 2 (Completed):** Iteration-level continuous batching scheduler, multi-sequence priority queue, and **Tiered GPU ⇄ Host CPU RAM Swapping** to eliminate consumer GPU OOM crashes.
+* **Phase 3 (Next Up):** Automated benchmark runner (`benchmark/runner.py`) testing throughput, TTFT latency, and memory fragmentation across Zipfian request distributions.
 * **Phase 4 (Pending):** Dual-tier dashboard display (GPU Green + CPU Blue) and final technical portfolio packaging.
 
 ---
@@ -162,9 +166,10 @@ pip install -r requirements.txt
 ```
 
 ### 2. Run Test Suite
-Verify that all memory management primitives and neural inference components pass:
+Verify that all memory management primitives, tiered swap, and scheduler components pass:
 ```bash
-python -m pytest tests/test_allocator.py tests/test_kv_cache.py tests/test_prefix_cache.py -v
+python -m pytest tests/test_allocator.py tests/test_kv_cache.py tests/test_prefix_cache.py tests/test_tiered_swap.py tests/test_scheduler.py -v
+```
 ```
 
 ### 3. Launch Observability Dashboard

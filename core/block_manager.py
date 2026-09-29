@@ -1,15 +1,21 @@
 import time
+from enum import Enum
 from collections import deque
 from typing import List, Optional, Dict, Any
+
+class MemoryTier(str, Enum):
+    GPU = "GPU"
+    CPU = "CPU"
 
 class PhysicalBlock:
     """
     Represents an isolated, fixed-size physical memory block in GPU VRAM or Host RAM.
-    Stores metadata including block ID, atomic reference count, and LRU access timestamp.
+    Stores metadata including block ID, atomic reference count, tier, and LRU access timestamp.
     """
-    def __init__(self, block_id: int, block_size: int = 16):
+    def __init__(self, block_id: int, block_size: int = 16, tier: MemoryTier = MemoryTier.GPU):
         self.block_id = block_id
         self.block_size = block_size
+        self.tier = tier
         self.ref_count = 0
         self.last_accessed: float = time.perf_counter()
         self.prefix_hash: Optional[str] = None
@@ -45,8 +51,10 @@ class PhysicalBlock:
         self.touch()
 
     def to_dict(self) -> Dict[str, Any]:
+        tier_val = self.tier.value if hasattr(self.tier, "value") else str(self.tier)
         return {
             "block_id": self.block_id,
+            "tier": tier_val,
             "ref_count": self.ref_count,
             "is_shared": self.is_shared,
             "is_immutable": self.is_immutable,
@@ -56,16 +64,17 @@ class PhysicalBlock:
 
 class BlockAllocator:
     """
-    Lock-free Physical Block Allocator managing fixed-size GPU VRAM memory blocks.
+    Lock-free Physical Block Allocator managing fixed-size GPU VRAM or Host CPU memory blocks.
     Guarantees O(1) allocation, O(1) deallocation, and tracks memory fragmentation.
     """
-    def __init__(self, num_blocks: int, block_size: int = 16):
+    def __init__(self, num_blocks: int, block_size: int = 16, tier: MemoryTier = MemoryTier.GPU):
         self.num_blocks = num_blocks
         self.block_size = block_size
+        self.tier = tier
 
-        # Pre-instantiate all physical blocks
+        # Pre-instantiate all physical blocks for this tier
         self.blocks: List[PhysicalBlock] = [
-            PhysicalBlock(block_id=i, block_size=block_size) for i in range(num_blocks)
+            PhysicalBlock(block_id=i, block_size=block_size, tier=tier) for i in range(num_blocks)
         ]
 
         # Free pool: circular deque for O(1) pop and append
@@ -136,7 +145,9 @@ class BlockAllocator:
     def get_status(self) -> Dict[str, Any]:
         """Telemetry snapshot of current physical memory state"""
         shared_count = sum(1 for b in self.blocks if b.is_shared)
+        tier_val = self.tier.value if hasattr(self.tier, "value") else str(self.tier)
         return {
+            "tier": tier_val,
             "total_blocks": self.num_blocks,
             "allocated_blocks": self.num_allocated_blocks,
             "free_blocks": self.num_free_blocks,

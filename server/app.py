@@ -65,6 +65,7 @@ async def health_check():
 @app.get("/api/telemetry")
 async def get_telemetry():
     alloc_status = allocator.get_status()
+    cpu_alloc_status = neural_engine.cpu_allocator.get_status()
     cache_status = prefix_cache.get_status()
     
     # Block details array for instant matrix sync
@@ -72,16 +73,32 @@ async def get_telemetry():
     for b in allocator.blocks:
         block_details.append({
             "id": b.block_id,
+            "tier": "GPU",
             "ref_count": b.ref_count,
             "is_shared": b.is_shared,
             "prefix_hash": b.prefix_hash
         })
 
+    # CPU swap block summary
+    cpu_swap_details = []
+    for b in neural_engine.cpu_allocator.blocks[:32]: # First 32 blocks for preview
+        cpu_swap_details.append({
+            "id": b.block_id,
+            "tier": "CPU",
+            "ref_count": b.ref_count,
+            "is_shared": b.is_shared
+        })
+
+    scheduler_diag = neural_engine.scheduler.get_diagnostics()
+
     return {
         "allocator": alloc_status,
+        "cpu_allocator": cpu_alloc_status,
         "prefix_cache": cache_status,
-        "active_sequences": len(active_page_tables),
-        "blocks": block_details
+        "active_sequences": len(neural_engine.active_page_tables),
+        "scheduler": scheduler_diag,
+        "blocks": block_details,
+        "cpu_blocks": cpu_swap_details
     }
 
 class EstimateRequest(BaseModel):
@@ -343,6 +360,56 @@ async def set_block_size(req: BlockSizeRequest):
         "block_size": BLOCK_SIZE,
         "total_blocks": TOTAL_BLOCKS,
         "token_capacity": TOTAL_BLOCKS * BLOCK_SIZE
+    }
+
+class BatchSimulateRequest(BaseModel):
+    num_requests: int = 6
+    min_tokens: int = 8
+    max_tokens: int = 32
+
+@app.post("/api/batch_simulate")
+async def simulate_continuous_batching(req: BatchSimulateRequest):
+    """
+    Executes a multi-sequence continuous batching simulation,
+    demonstrating iteration-level admission, retirement, and tiered swap-out under pressure.
+    """
+    from core.request import Sequence
+    import random
+    sim_scheduler = ContinuousScheduler(
+        num_gpu_blocks=TOTAL_BLOCKS,
+        num_cpu_blocks=TOTAL_BLOCKS * 2,
+        block_size=BLOCK_SIZE,
+        watermark_blocks=2
+    )
+
+    for i in range(1, req.num_requests + 1):
+        p_len = random.randint(12, 36)
+        out_len = random.randint(req.min_tokens, req.max_tokens)
+        seq = Sequence(seq_id=i, prompt_tokens=[100 + i] * p_len, max_output_tokens=out_len)
+        sim_scheduler.add_request(seq)
+
+    steps_log = []
+    step_num = 0
+    while sim_scheduler.has_unfinished_requests and step_num < 200:
+        step_num += 1
+        out = sim_scheduler.step()
+        steps_log.append({
+            "step": out.step_id,
+            "running": out.running_seq_ids,
+            "waiting": out.waiting_seq_ids,
+            "swapped": out.swapped_seq_ids,
+            "finished": out.newly_finished_seq_ids,
+            "preempted": out.preempted_seq_ids,
+            "restored": out.restored_seq_ids,
+            "gpu_util_pct": out.gpu_utilization_pct,
+            "gpu_free_blocks": out.gpu_free_blocks
+        })
+
+    return {
+        "status": "COMPLETED",
+        "total_steps": step_num,
+        "completed_requests": len(sim_scheduler.finished_sequences),
+        "steps_log": steps_log[:50]
     }
 
 if __name__ == "__main__":

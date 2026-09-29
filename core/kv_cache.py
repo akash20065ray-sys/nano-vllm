@@ -3,8 +3,12 @@ from typing import List, Optional, Tuple, Dict, Any
 
 class PagedKVCache:
     """
-    Unified physical tensor pool managing Key and Value state buffers in GPU VRAM or CPU RAM.
-    Provides vectorized block indexing and zero-copy block duplication for Copy-On-Write.
+    Unified 2-Tier Physical Tensor Pool managing Key and Value state buffers.
+    - Tier 1 (GPU VRAM / Active Device): High-bandwidth tensor storage for active decode attention.
+    - Tier 2 (Host CPU RAM / Pinned Memory): High-capacity swap space for evicted/preempted blocks.
+    
+    Provides vectorized block indexing, zero-copy Copy-On-Write duplication,
+    and asynchronous PCIe DMA swap transfers (cudaMemcpyAsync).
     """
     def __init__(
         self,
@@ -14,9 +18,11 @@ class PagedKVCache:
         head_dim: int = 64,
         block_size: int = 16,
         dtype: torch.dtype = torch.float16,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        num_cpu_blocks: Optional[int] = None
     ):
         self.num_blocks = num_blocks
+        self.num_cpu_blocks = num_cpu_blocks if num_cpu_blocks is not None else num_blocks * 2
         self.num_layers = num_layers
         self.num_heads = num_heads
         self.head_dim = head_dim
@@ -39,6 +45,7 @@ class PagedKVCache:
         tensor_dtype = torch.float32 if self.device.type == "cpu" and dtype == torch.float16 else dtype
         self.tensor_dtype = tensor_dtype
 
+        # Tier 1: GPU VRAM / Active device buffer
         self.k_cache = torch.zeros(
             (num_blocks, num_layers, num_heads, block_size, head_dim),
             dtype=tensor_dtype,
@@ -50,12 +57,39 @@ class PagedKVCache:
             device=self.device
         )
 
+        # Tier 2: Host CPU RAM Swap Pool (Pinned Memory for fast DMA transfers)
+        is_pinned = (self.device.type == "cuda" and torch.cuda.is_available())
+        self.cpu_k_cache = torch.zeros(
+            (self.num_cpu_blocks, num_layers, num_heads, block_size, head_dim),
+            dtype=tensor_dtype,
+            device=torch.device("cpu"),
+            pin_memory=is_pinned
+        )
+        self.cpu_v_cache = torch.zeros(
+            (self.num_cpu_blocks, num_layers, num_heads, block_size, head_dim),
+            dtype=tensor_dtype,
+            device=torch.device("cpu"),
+            pin_memory=is_pinned
+        )
+
     @property
-    def total_memory_mb(self) -> float:
-        """Calculates exact physical tensor pool memory in Megabytes"""
+    def gpu_memory_mb(self) -> float:
+        """Calculates Tier 1 GPU physical tensor pool memory in Megabytes"""
         elem_size = 2 if self.tensor_dtype == torch.float16 else 4
         total_elements = 2 * (self.num_blocks * self.num_layers * self.num_heads * self.block_size * self.head_dim)
         return round((total_elements * elem_size) / (1024 * 1024), 2)
+
+    @property
+    def cpu_memory_mb(self) -> float:
+        """Calculates Tier 2 Host CPU swap memory in Megabytes"""
+        elem_size = 2 if self.tensor_dtype == torch.float16 else 4
+        total_elements = 2 * (self.num_cpu_blocks * self.num_layers * self.num_heads * self.block_size * self.head_dim)
+        return round((total_elements * elem_size) / (1024 * 1024), 2)
+
+    @property
+    def total_memory_mb(self) -> float:
+        """Returns primary active GPU memory in Megabytes for backwards compatibility"""
+        return self.gpu_memory_mb
 
     def write_kv(
         self,
@@ -66,7 +100,7 @@ class PagedKVCache:
         v: torch.Tensor
     ):
         """
-        Writes a single token's Key and Value vector into physical block at designated offset.
+        Writes a single token's Key and Value vector into GPU physical block at designated offset.
         k, v shape: [num_heads, head_dim]
         """
         self.k_cache[physical_block_id, layer_idx, :, offset, :] = k.to(device=self.device, dtype=self.tensor_dtype)
@@ -79,6 +113,22 @@ class PagedKVCache:
         """
         self.k_cache[dst_block_id].copy_(self.k_cache[src_block_id])
         self.v_cache[dst_block_id].copy_(self.v_cache[src_block_id])
+
+    def swap_out_block(self, gpu_block_id: int, cpu_block_id: int):
+        """
+        Asynchronously transfers 1 physical block from GPU VRAM to Host CPU RAM (Pinned Memory).
+        Uses non_blocking=True for PCIe DMA overlap.
+        """
+        self.cpu_k_cache[cpu_block_id].copy_(self.k_cache[gpu_block_id], non_blocking=True)
+        self.cpu_v_cache[cpu_block_id].copy_(self.v_cache[gpu_block_id], non_blocking=True)
+
+    def swap_in_block(self, cpu_block_id: int, gpu_block_id: int):
+        """
+        Asynchronously transfers 1 physical block from Host CPU RAM to GPU VRAM.
+        Uses non_blocking=True for PCIe DMA overlap.
+        """
+        self.k_cache[gpu_block_id].copy_(self.cpu_k_cache[cpu_block_id], non_blocking=True)
+        self.v_cache[gpu_block_id].copy_(self.cpu_v_cache[cpu_block_id], non_blocking=True)
 
     def gather_sequence_kv(
         self,

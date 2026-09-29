@@ -1,21 +1,35 @@
 from typing import List, Tuple, Dict, Any, Optional
-from core.block_manager import BlockAllocator, PhysicalBlock
+from core.block_manager import BlockAllocator, PhysicalBlock, MemoryTier
 
 class PageTable:
     """
     Manages the virtual-to-physical address translation for an individual inference sequence.
-    Maps contiguous logical token space to arbitrary, non-contiguous physical blocks in GPU VRAM.
-    Implements Copy-On-Write (CoW) page isolation.
+    Maps contiguous logical token space to arbitrary, non-contiguous physical blocks in GPU VRAM or Host RAM.
+    Implements Copy-On-Write (CoW) page isolation and 2-Tier Swapping (GPU VRAM ⇄ Host CPU RAM).
     """
     def __init__(self, seq_id: int, block_size: int = 16):
         self.seq_id = seq_id
         self.block_size = block_size
         self.logical_to_physical: List[int] = []
+        self.logical_to_tier: List[str] = []
         self.num_tokens: int = 0
 
     @property
     def num_blocks(self) -> int:
         return len(self.logical_to_physical)
+
+    @property
+    def is_swapped(self) -> bool:
+        """Returns True if any logical block is currently swapped out to Host CPU RAM"""
+        return any(t == "CPU" for t in self.logical_to_tier)
+
+    @property
+    def num_gpu_blocks(self) -> int:
+        return sum(1 for t in self.logical_to_tier if t == "GPU")
+
+    @property
+    def num_cpu_blocks(self) -> int:
+        return sum(1 for t in self.logical_to_tier if t == "CPU")
 
     def translate_token(self, token_idx: int) -> Tuple[int, int]:
         """
@@ -49,6 +63,8 @@ class PageTable:
             # Boundary crossed -> allocate a fresh physical block
             new_block = allocator.allocate()
             self.logical_to_physical.append(new_block.block_id)
+            tier_val = new_block.tier.value if hasattr(new_block.tier, "value") else str(new_block.tier)
+            self.logical_to_tier.append(tier_val)
             is_new_block = True
 
         physical_block_id = self.logical_to_physical[logical_block_idx]
@@ -63,6 +79,8 @@ class PageTable:
         block = allocator.blocks[physical_block_id]
         block.increment_ref()
         self.logical_to_physical.append(physical_block_id)
+        tier_val = block.tier.value if hasattr(block.tier, "value") else str(block.tier)
+        self.logical_to_tier.append(tier_val)
         self.num_tokens += self.block_size
 
     def trigger_copy_on_write(
@@ -88,6 +106,8 @@ class PageTable:
 
             # Re-map page table entry to new private block
             self.logical_to_physical[logical_block_idx] = new_phys_id
+            tier_val = new_block.tier.value if hasattr(new_block.tier, "value") else str(new_block.tier)
+            self.logical_to_tier[logical_block_idx] = tier_val
 
             # Decrement shared block reference count
             old_block.decrement_ref()
@@ -96,14 +116,75 @@ class PageTable:
 
         return None
 
-    def free_all(self, allocator: BlockAllocator):
+    def swap_out(
+        self,
+        gpu_allocator: BlockAllocator,
+        cpu_allocator: BlockAllocator,
+        kv_cache: Optional[Any] = None
+    ) -> List[Tuple[int, int]]:
+        """
+        Paging out: Moves all GPU blocks owned by this sequence to Host CPU RAM.
+        Returns list of (gpu_block_id, cpu_block_id) pairs.
+        """
+        swapped_pairs = []
+        for logical_idx in range(len(self.logical_to_physical)):
+            if self.logical_to_tier[logical_idx] == "GPU":
+                gpu_bid = self.logical_to_physical[logical_idx]
+                cpu_block = cpu_allocator.allocate()
+                cpu_bid = cpu_block.block_id
+
+                if kv_cache is not None:
+                    kv_cache.swap_out_block(gpu_bid, cpu_bid)
+
+                # Free GPU block and re-point page table entry
+                gpu_allocator.free(gpu_bid)
+                self.logical_to_physical[logical_idx] = cpu_bid
+                self.logical_to_tier[logical_idx] = "CPU"
+                swapped_pairs.append((gpu_bid, cpu_bid))
+
+        return swapped_pairs
+
+    def swap_in(
+        self,
+        gpu_allocator: BlockAllocator,
+        cpu_allocator: BlockAllocator,
+        kv_cache: Optional[Any] = None
+    ) -> List[Tuple[int, int]]:
+        """
+        Paging in: Swaps all CPU blocks back to GPU VRAM when sequence is scheduled to run.
+        Returns list of (cpu_block_id, gpu_block_id) pairs.
+        """
+        swapped_pairs = []
+        for logical_idx in range(len(self.logical_to_physical)):
+            if self.logical_to_tier[logical_idx] == "CPU":
+                cpu_bid = self.logical_to_physical[logical_idx]
+                gpu_block = gpu_allocator.allocate()
+                gpu_bid = gpu_block.block_id
+
+                if kv_cache is not None:
+                    kv_cache.swap_in_block(cpu_bid, gpu_bid)
+
+                # Free CPU block and re-point page table entry
+                cpu_allocator.free(cpu_bid)
+                self.logical_to_physical[logical_idx] = gpu_bid
+                self.logical_to_tier[logical_idx] = "GPU"
+                swapped_pairs.append((cpu_bid, gpu_bid))
+
+        return swapped_pairs
+
+    def free_all(self, allocator: BlockAllocator, cpu_allocator: Optional[BlockAllocator] = None):
         """
         Reclaims all physical memory blocks owned or referenced by this sequence.
         Returns blocks to the free pool if their ref_count drops to 0.
         """
-        for phys_id in self.logical_to_physical:
-            allocator.free(phys_id)
+        for i, phys_id in enumerate(self.logical_to_physical):
+            tier = self.logical_to_tier[i] if i < len(self.logical_to_tier) else "GPU"
+            if tier == "CPU" and cpu_allocator is not None:
+                cpu_allocator.free(phys_id)
+            else:
+                allocator.free(phys_id)
         self.logical_to_physical.clear()
+        self.logical_to_tier.clear()
         self.num_tokens = 0
 
     def get_fragmentation_stats(self) -> Dict[str, Any]:
@@ -132,5 +213,7 @@ class PageTable:
             "num_tokens": self.num_tokens,
             "num_blocks": len(self.logical_to_physical),
             "logical_to_physical": list(self.logical_to_physical),
+            "tiers": list(self.logical_to_tier),
+            "is_swapped": self.is_swapped,
             "fragmentation": self.get_fragmentation_stats()
         }
