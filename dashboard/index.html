@@ -25,9 +25,21 @@
                 <span class="chip-label">DEVICE:</span>
                 <span class="chip-val" id="deviceVal">CUDA:0 (RTX 3050)</span>
             </div>
-            <div class="system-chip">
+            <div class="system-chip" id="modelChip">
+                <span class="chip-label">MODEL:</span>
+                <select id="engineModeSelect" class="chip-select">
+                    <option value="neural" selected>🧠 SmolLM-135M (Real Neural Weights)</option>
+                    <option value="simulation">⚡ Simulation Mode (Instant)</option>
+                </select>
+            </div>
+            <div class="system-chip" id="blockSizeChip">
                 <span class="chip-label">BLOCK SIZE:</span>
-                <span class="chip-val" id="blockSizeVal">16 Tokens</span>
+                <select id="blockSizeSelect" class="chip-select">
+                    <option value="8">8 Tokens (Min Frag)</option>
+                    <option value="16" selected>16 Tokens (Default)</option>
+                    <option value="32">32 Tokens (High Coalesce)</option>
+                    <option value="64">64 Tokens (Wide Vector)</option>
+                </select>
             </div>
             <div class="status-indicator online" id="serverStatus">
                 <span class="indicator-dot"></span>
@@ -213,6 +225,29 @@
                         <span class="terminal-label" id="terminalStatus">Awaiting prompt input...</span>
                         <span class="terminal-speed" id="streamSpeedHud">0 tok/s</span>
                     </div>
+
+                    <!-- Autoregressive Token Prediction Inspector -->
+                    <div class="autoregressive-inspector" id="autoregressiveInspector">
+                        <div class="ins-col">
+                            <span class="ins-label">ACTIVE TOKEN</span>
+                            <span class="ins-val-token" id="insToken">--</span>
+                        </div>
+                        <div class="ins-col">
+                            <span class="ins-label">CONFIDENCE</span>
+                            <span class="ins-val-prob" id="insProb">--%</span>
+                        </div>
+                        <div class="ins-col flex-wide">
+                            <span class="ins-label">TOP-3 LOGITS / PROBABILITIES</span>
+                            <div class="ins-chips" id="insChips">
+                                <span class="ins-chip">Softmax P(w) distribution...</span>
+                            </div>
+                        </div>
+                        <div class="ins-col">
+                            <span class="ins-label">VRAM TARGET</span>
+                            <span class="ins-val-target" id="insTarget">Block --, Slot --</span>
+                        </div>
+                    </div>
+
                     <div class="terminal-output" id="terminalOutput">
                         <span class="placeholder-text">Generated tokens will stream here in real time...</span>
                     </div>

@@ -1,11 +1,12 @@
 /**
  * nano-vllm: Systems Observability & Live GPU VRAM Matrix Controller
  * Real-time physical block matrix, live typing estimation HUD, SSE streaming,
- * Copy-On-Write (CoW) tracking, and failure-injection telemetry.
+ * Copy-On-Write (CoW) tracking, SmolLM-135M neural inference, and failure-injection telemetry.
  */
 
 const TOTAL_BLOCKS = 128;
-const BLOCK_SIZE = 16; // 16 tokens per block
+let currentBlockSize = 16;
+let currentEngineMode = "neural"; // "neural" (SmolLM-135M) or "simulation"
 
 // In-memory UI State
 const state = {
@@ -19,9 +20,9 @@ const state = {
 
 // Preset Prompts
 const PROMPT_PRESETS = {
-    vit_syllabus: "You are the official academic assistant for VIT Pune AIDS department. Detail the Semester 5 course outcomes for Deep Learning Systems, High-Performance Computing, and Distributed Systems.",
-    code_kernel: "Write a high-performance CUDA C++ kernel for 2D matrix multiplication (GEMM) using 16x16 shared memory tiling to maximize L1 cache reuse.",
-    explain_paging: "Explain how Virtual Memory Paging and Page Tables eliminate external memory fragmentation in Operating Systems and how PagedAttention adapts this to GPU VRAM.",
+    vit_syllabus: "What are the core concepts in the VIT Pune AIDS curriculum for Deep Learning and GPU Systems?",
+    code_kernel: "Write a high-performance Python function for matrix multiplication using nested loops.",
+    explain_paging: "Explain how Virtual Memory Paging and Page Tables eliminate external memory fragmentation.",
     custom: ""
 };
 
@@ -40,7 +41,8 @@ document.addEventListener("DOMContentLoaded", () => {
     setInterval(updateTelemetryHUD, 1000);
 });
 
-function initBlockMatrix() {
+function initBlockMatrix(blockSize = currentBlockSize) {
+    currentBlockSize = blockSize;
     const grid = document.getElementById("vramGrid");
     grid.innerHTML = "";
     state.blocks = [];
@@ -65,7 +67,7 @@ function initBlockMatrix() {
             <div class="block-fill-track">
                 <div class="block-fill-bar" style="width: 0%"></div>
             </div>
-            <div class="cell-tokens">0/16</div>
+            <div class="cell-tokens">0/${currentBlockSize}</div>
         `;
         cell.addEventListener("click", () => inspectBlock(i));
         grid.appendChild(cell);
@@ -108,6 +110,42 @@ function initEventListeners() {
     document.getElementById("btnStressPressure").addEventListener("click", simulateVRAMExhaustion);
     document.getElementById("btnReclaimAll").addEventListener("click", reclaimAllMemory);
     document.getElementById("btnRunBenchmark").addEventListener("click", triggerQuickBenchmark);
+
+    // Engine Mode Selector (Real SmolLM-135M vs Fast Sim)
+    const engineModeSelect = document.getElementById("engineModeSelect");
+    if (engineModeSelect) {
+        engineModeSelect.addEventListener("change", (e) => {
+            currentEngineMode = e.target.value;
+            const badge = document.getElementById("engineModeBadge");
+            if (badge) {
+                badge.innerText = currentEngineMode === "neural" ? "MODE: SMOL-LM 135M (NEURAL)" : "MODE: FAST SIMULATION";
+            }
+        });
+    }
+
+    // Dynamic Hardware Block Size Selector (8, 16, 32, 64)
+    const blockSizeSelect = document.getElementById("blockSizeSelect");
+    if (blockSizeSelect) {
+        blockSizeSelect.addEventListener("change", async (e) => {
+            const newSize = parseInt(e.target.value, 10);
+            try {
+                const res = await fetch("/api/block_size", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ block_size: newSize })
+                });
+                if (res.ok) {
+                    currentBlockSize = newSize;
+                    initBlockMatrix(newSize);
+                    handlePromptTyping();
+                }
+            } catch {
+                currentBlockSize = newSize;
+                initBlockMatrix(newSize);
+                handlePromptTyping();
+            }
+        });
+    }
 
     // Modal controls
     document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
@@ -164,10 +202,8 @@ function updateBlockCell(blockId, animated = false) {
         setTimeout(() => cell.classList.remove("token-pulse"), 350);
     }
 
-    const fillPct = block.status === "free" ? 0 : Math.min(100, Math.round((block.tokensOccupied / BLOCK_SIZE) * 100));
-    const tokenDisplay = block.status === "preview" 
-        ? `${block.tokensOccupied}/16`
-        : `${block.tokensOccupied}/16`;
+    const fillPct = block.status === "free" ? 0 : Math.min(100, Math.round((block.tokensOccupied / currentBlockSize) * 100));
+    const tokenDisplay = `${block.tokensOccupied}/${currentBlockSize}`;
 
     let content = `
         <div class="cell-id">${blockId}</div>
@@ -200,17 +236,17 @@ function handlePromptTyping() {
     const input = document.getElementById("promptInput");
     const text = input.value.trim();
 
-    // 1. Instant client-side token & block estimation (Zero lag typing response)
+    // 1. Instant client-side token & block estimation
     const words = text ? text.split(/\s+/).filter(Boolean) : [];
     const estTokens = text ? Math.max(words.length, Math.ceil(text.length / 3.8)) : 0;
-    const blocksNeeded = text ? Math.ceil(estTokens / BLOCK_SIZE) : 0;
-    const trailingTokens = estTokens % BLOCK_SIZE || (estTokens > 0 ? BLOCK_SIZE : 0);
-    const trailingPct = estTokens > 0 ? Math.round((trailingTokens / BLOCK_SIZE) * 100) : 0;
+    const blocksNeeded = text ? Math.ceil(estTokens / currentBlockSize) : 0;
+    const trailingTokens = estTokens % currentBlockSize || (estTokens > 0 ? currentBlockSize : 0);
+    const trailingPct = estTokens > 0 ? Math.round((trailingTokens / currentBlockSize) * 100) : 0;
 
     // Update Live HUD
     document.getElementById("liveTokenCount").innerText = estTokens;
     document.getElementById("liveBlockCount").innerText = blocksNeeded;
-    document.getElementById("liveTrailingFill").innerText = `${trailingTokens}/16 (${trailingPct}%)`;
+    document.getElementById("liveTrailingFill").innerText = `${trailingTokens}/${currentBlockSize} (${trailingPct}%)`;
 
     // 2. Clear previous preview blocks
     state.blocks.forEach(b => {
@@ -228,22 +264,22 @@ function handlePromptTyping() {
         return;
     }
 
-    // 3. Mark candidate free blocks as "preview" to visualize memory demand live
+    // 3. Mark candidate free blocks as "preview"
     let reserved = 0;
     for (let i = 0; i < TOTAL_BLOCKS && reserved < blocksNeeded; i++) {
         if (state.blocks[i].status === "free") {
             state.blocks[i].status = "preview";
-            if (reserved === blocksNeeded - 1 && estTokens % BLOCK_SIZE !== 0) {
-                state.blocks[i].tokensOccupied = estTokens % BLOCK_SIZE;
+            if (reserved === blocksNeeded - 1 && estTokens % currentBlockSize !== 0) {
+                state.blocks[i].tokensOccupied = estTokens % currentBlockSize;
             } else {
-                state.blocks[i].tokensOccupied = BLOCK_SIZE;
+                state.blocks[i].tokensOccupied = currentBlockSize;
             }
             updateBlockCell(i);
             reserved++;
         }
     }
 
-    // 4. Debounced call to backend /api/estimate to sync exact prefix cache hit status
+    // 4. Debounced call to backend /api/estimate
     clearTimeout(state.typingDebounceTimer);
     state.typingDebounceTimer = setTimeout(async () => {
         if (!backendOnline || !text) return;
@@ -292,7 +328,7 @@ function allocateBlock(seqId, isPrefix = false) {
     block.status = isPrefix ? "shared" : "active";
     block.refCount = 1;
     block.seqId = seqId;
-    block.tokensOccupied = BLOCK_SIZE;
+    block.tokensOccupied = currentBlockSize;
     updateBlockCell(bid, true);
     return bid;
 }
@@ -345,8 +381,10 @@ async function submitUserPrompt() {
     const statusLabel = document.getElementById("terminalStatus");
     const speedHud = document.getElementById("streamSpeedHud");
 
-    terminal.innerHTML = "";
-    statusLabel.innerText = "Allocating physical KV blocks...";
+    terminal.innerHTML = '<span class="streaming-cursor">█</span>';
+    statusLabel.innerText = currentEngineMode === "neural" 
+        ? "Running SmolLM-135M Neural Forward Pass..."
+        : "Allocating physical KV blocks...";
 
     const seqId = state.activeSeqIdCounter++;
     const req = {
@@ -389,7 +427,11 @@ async function streamFromBackend(req, text, terminal, statusLabel, speedHud) {
     const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, max_tokens: 48 })
+        body: JSON.stringify({ 
+            prompt: text, 
+            max_tokens: 48,
+            engine_mode: currentEngineMode 
+        })
     });
 
     if (!response.ok) {
@@ -399,6 +441,7 @@ async function streamFromBackend(req, text, terminal, statusLabel, speedHud) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
+    let accumulatedText = "";
 
     while (true) {
         const { done, value } = await reader.read();
@@ -424,7 +467,7 @@ async function streamFromBackend(req, text, terminal, statusLabel, speedHud) {
                 req.ttftMs = event.ttft_ms;
                 req.prefixHit = event.prefix_hit;
                 document.getElementById("valTTFT").innerText = event.ttft_ms;
-                statusLabel.innerText = `Prefill completed in ${event.ttft_ms}ms. Decoding tokens...`;
+                statusLabel.innerText = `Prefill done (${event.ttft_ms}ms). Streaming tokens...`;
 
                 // Register prefix blocks
                 if (event.prefix_blocks && event.prefix_blocks.length > 0) {
@@ -432,7 +475,7 @@ async function streamFromBackend(req, text, terminal, statusLabel, speedHud) {
                         const b = state.blocks[bid];
                         b.status = "shared";
                         b.refCount = Math.max(2, b.refCount + 1);
-                        b.tokensOccupied = BLOCK_SIZE;
+                        b.tokensOccupied = currentBlockSize;
                         req.allocatedBlocks.push(bid);
                         updateBlockCell(bid, true);
                     });
@@ -446,7 +489,7 @@ async function streamFromBackend(req, text, terminal, statusLabel, speedHud) {
                             b.status = "active";
                             b.refCount = 1;
                             b.seqId = req.seqId;
-                            b.tokensOccupied = BLOCK_SIZE;
+                            b.tokensOccupied = currentBlockSize;
                             req.allocatedBlocks.push(bid);
                             updateBlockCell(bid, true);
                         }
@@ -454,9 +497,26 @@ async function streamFromBackend(req, text, terminal, statusLabel, speedHud) {
                 }
                 renderDiagnosticsTable();
             } else if (event.type === "token") {
-                terminal.innerHTML += event.token + " ";
+                accumulatedText += event.token;
+                terminal.innerHTML = accumulatedText + '<span class="streaming-cursor">█</span>';
                 terminal.scrollTop = terminal.scrollHeight;
                 req.generatedTokens++;
+
+                // Update Autoregressive Token Inspector
+                const insToken = document.getElementById("insToken");
+                const insProb = document.getElementById("insProb");
+                const insChips = document.getElementById("insChips");
+                const insTarget = document.getElementById("insTarget");
+
+                if (insToken) insToken.innerText = event.token.trim() || '""';
+                if (insProb) insProb.innerText = event.confidence || "--%";
+                if (insTarget) insTarget.innerText = `Block #${event.physical_block_id}, Slot ${event.block_offset + 1}/${currentBlockSize}`;
+
+                if (insChips && event.top_candidates && event.top_candidates.length > 0) {
+                    insChips.innerHTML = event.top_candidates.map((cand, idx) => 
+                        `<span class="ins-chip ${idx === 0 ? 'top-match' : ''}">P("${cand.token.trim()}"): ${cand.prob}</span>`
+                    ).join("");
+                }
 
                 // Update physical block slot fill live!
                 const bid = event.physical_block_id;
@@ -479,13 +539,14 @@ async function streamFromBackend(req, text, terminal, statusLabel, speedHud) {
                 document.getElementById("valTPS").innerText = tokPerSec;
                 
                 // Update internal fragmentation live
-                const totalSlots = req.allocatedBlocks.length * BLOCK_SIZE;
+                const totalSlots = req.allocatedBlocks.length * currentBlockSize;
                 const usedSlots = (req.promptTokens || 0) + req.generatedTokens;
                 const emptySlots = Math.max(0, totalSlots - usedSlots);
                 const fragPct = totalSlots > 0 ? ((emptySlots / totalSlots) * 100).toFixed(1) : "0.0";
                 document.getElementById("valFrag").innerText = fragPct;
 
             } else if (event.type === "done") {
+                terminal.innerHTML = accumulatedText; // Remove cursor upon completion
                 req.status = "COMPLETED";
                 req.meanItlMs = event.mean_itl_ms;
                 statusLabel.innerText = `Completed (${event.total_tokens} tokens @ ${event.mean_itl_ms}ms mean ITL).`;
@@ -506,7 +567,7 @@ async function streamFromBackend(req, text, terminal, statusLabel, speedHud) {
  */
 async function streamFromSimulation(req, text, terminal, statusLabel, speedHud) {
     try {
-        const promptBlocksNeeded = Math.ceil(req.promptTokens / BLOCK_SIZE);
+        const promptBlocksNeeded = Math.ceil(req.promptTokens / currentBlockSize);
         for (let i = 0; i < promptBlocksNeeded; i++) {
             const bid = allocateBlock(req.seqId, false);
             req.allocatedBlocks.push(bid);
@@ -522,11 +583,13 @@ async function streamFromSimulation(req, text, terminal, statusLabel, speedHud) 
         let tokensStreamed = 0;
         let lastTokenTime = performance.now();
         const itls = [];
+        let accumulatedText = "";
 
         let currentBlockIdx = req.allocatedBlocks[req.allocatedBlocks.length - 1];
 
         for (const word of words) {
-            terminal.innerHTML += word + " ";
+            accumulatedText += word + " ";
+            terminal.innerHTML = accumulatedText + '<span class="streaming-cursor">█</span>';
             terminal.scrollTop = terminal.scrollHeight;
             tokensStreamed++;
             req.generatedTokens = tokensStreamed;
@@ -537,7 +600,7 @@ async function streamFromSimulation(req, text, terminal, statusLabel, speedHud) 
             lastTokenTime = now;
 
             // Boundary crossed -> allocate new block
-            const offset = (tokensStreamed - 1) % BLOCK_SIZE;
+            const offset = (tokensStreamed - 1) % currentBlockSize;
             if (offset === 0 && tokensStreamed > 1) {
                 currentBlockIdx = allocateBlock(req.seqId, false);
                 req.allocatedBlocks.push(currentBlockIdx);
@@ -556,6 +619,7 @@ async function streamFromSimulation(req, text, terminal, statusLabel, speedHud) 
             await sleep(28);
         }
 
+        terminal.innerHTML = accumulatedText;
         req.status = "COMPLETED";
         req.meanItlMs = (itls.reduce((a, b) => a + b, 0) / itls.length).toFixed(1);
         statusLabel.innerText = `Completed (${tokensStreamed} tokens @ ${req.meanItlMs}ms ITL).`;
@@ -574,10 +638,10 @@ async function streamFromSimulation(req, text, terminal, statusLabel, speedHud) 
 function generateMockResponse(prompt) {
     if (prompt.includes("VIT Pune")) {
         return "The VIT Pune AIDS curriculum covers Deep Learning Systems, Parallel GPU Computing with CUDA, and High-Throughput Model Serving. Core modules focus on tensor optimizations, memory coalescing, and KV-cache management in modern LLMs.".split(" ");
-    } else if (prompt.includes("CUDA")) {
-        return "__global__ void matrixMulTiled(float* C, const float* A, const float* B, int N) {\n  __shared__ float sA[16][16];\n  __shared__ float sB[16][16];\n  // Coalesced loads and compute\n}".split(" ");
+    } else if (prompt.includes("matrix") || prompt.includes("multiplication")) {
+        return "def matrix_multiply(A, B):\n    rows_A, cols_A = len(A), len(A[0])\n    rows_B, cols_B = len(B), len(B[0])\n    C = [[0 for _ in range(cols_B)] for _ in range(rows_A)]\n    for i in range(rows_A):\n        for j in range(cols_B):\n            for k in range(cols_A):\n                C[i][j] += A[i][k] * B[k][j]\n    return C".split(" ");
     } else {
-        return "nano-vllm partitions physical GPU memory into uniform 16-token blocks. Per-sequence Page Tables map logical indices to physical blocks, eliminating contiguous allocation constraints and internal memory fragmentation.".split(" ");
+        return "nano-vllm partitions physical GPU memory into uniform blocks. Per-sequence Page Tables map logical indices to physical blocks, eliminating contiguous allocation constraints and internal memory fragmentation.".split(" ");
     }
 }
 
@@ -588,23 +652,23 @@ async function testSharedPrefixDemo() {
     const statusLabel = document.getElementById("terminalStatus");
     statusLabel.innerText = "Testing Prefix Cache Hit with 2 concurrent sequences...";
 
-    // Sequence A submits 32-token prefix
+    // Sequence A submits prefix
     const seqA = state.activeSeqIdCounter++;
     const b0 = allocateBlock(seqA, true);
     const b1 = allocateBlock(seqA, true);
 
     state.blocks[b0].prefixHash = "0x8FA2B0";
     state.blocks[b1].prefixHash = "0x8FA2B1";
-    state.blocks[b0].tokensOccupied = BLOCK_SIZE;
-    state.blocks[b1].tokensOccupied = BLOCK_SIZE;
+    state.blocks[b0].tokensOccupied = currentBlockSize;
+    state.blocks[b1].tokensOccupied = currentBlockSize;
     updateBlockCell(b0);
     updateBlockCell(b1);
 
     const reqA = {
         seqId: seqA,
         status: "RUNNING",
-        promptText: "[System Prompt: 32 tokens] + Query A",
-        promptTokens: 40,
+        promptText: "[System Prompt] + Query A",
+        promptTokens: currentBlockSize * 2,
         generatedTokens: 16,
         queueLatencyMs: 0.8,
         ttftMs: 38.4,
@@ -630,8 +694,8 @@ async function testSharedPrefixDemo() {
     const reqB = {
         seqId: seqB,
         status: "RUNNING",
-        promptText: "[System Prompt: 32 tokens] + Query B",
-        promptTokens: 38,
+        promptText: "[System Prompt] + Query B",
+        promptTokens: currentBlockSize * 2,
         generatedTokens: 14,
         queueLatencyMs: 0.5,
         ttftMs: 0.8, // Instant 0ms TTFT!
@@ -657,7 +721,7 @@ async function simulateVRAMExhaustion() {
         state.blocks[freeB].status = "active";
         state.blocks[freeB].refCount = 1;
         state.blocks[freeB].seqId = 999;
-        state.blocks[freeB].tokensOccupied = BLOCK_SIZE;
+        state.blocks[freeB].tokensOccupied = currentBlockSize;
         updateBlockCell(freeB);
         freeB = findFreeBlock();
     }
@@ -794,20 +858,20 @@ function inspectBlock(blockId) {
     document.getElementById("modalTitle").innerText = `Physical Block #${blockId} Inspector`;
     
     const content = document.getElementById("modalContent");
-    const emptySlots = BLOCK_SIZE - block.tokensOccupied;
-    const internalFrag = block.status === "active" ? ((emptySlots / BLOCK_SIZE) * 100).toFixed(1) : "0.0";
+    const emptySlots = currentBlockSize - block.tokensOccupied;
+    const internalFrag = block.status === "active" ? ((emptySlots / currentBlockSize) * 100).toFixed(1) : "0.0";
     
     content.innerHTML = `
         <table class="modal-table">
             <tr><td>Physical Block ID:</td><td>${block.id}</td></tr>
-            <tr><td>Block Capacity:</td><td>${BLOCK_SIZE} Tokens (5D Physical Tensor Pool)</td></tr>
+            <tr><td>Block Capacity:</td><td>${currentBlockSize} Tokens (5D Physical Tensor Pool)</td></tr>
             <tr><td>State:</td><td><span class="status-badge ${block.status.toUpperCase()}">${block.status.toUpperCase()}</span></td></tr>
             <tr><td>Reference Count (ref_count):</td><td>${block.refCount}</td></tr>
             <tr><td>Active Sequence Owner:</td><td>${block.seqId ? '#' + block.seqId : 'None (Free / Shared)'}</td></tr>
             <tr><td>Shared Prefix Hash:</td><td>${block.prefixHash || 'N/A (Private)'}</td></tr>
-            <tr><td>Tokens Stored:</td><td><strong>${block.tokensOccupied} / ${BLOCK_SIZE}</strong> slots</td></tr>
+            <tr><td>Tokens Stored:</td><td><strong>${block.tokensOccupied} / ${currentBlockSize}</strong> slots</td></tr>
             <tr><td>Internal Fragmentation:</td><td><strong>${internalFrag}%</strong> (${emptySlots} unused slots)</td></tr>
-            <tr><td>VRAM Physical Address:</td><td>0x${(block.id * 16 * 1024).toString(16).toUpperCase()}</td></tr>
+            <tr><td>VRAM Physical Address:</td><td>0x${(block.id * currentBlockSize * 1024).toString(16).toUpperCase()}</td></tr>
         </table>
     `;
     document.getElementById("blockModal").classList.remove("hidden");

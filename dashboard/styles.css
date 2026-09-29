@@ -145,6 +145,24 @@ body {
     font-weight: 600;
 }
 
+.chip-select {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    color: var(--cyber-cyan);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    padding: 2px 6px;
+}
+
+.chip-select option {
+    background: #0f172a;
+    color: #ffffff;
+}
+
 .status-indicator {
     display: flex;
     align-items: center;
@@ -756,10 +774,98 @@ body {
     font-family: var(--font-mono);
 }
 
-.terminal-speed {
-    color: var(--nvidia-green);
+/* Autoregressive Token Prediction Inspector */
+.autoregressive-inspector {
+    display: flex;
+    background: rgba(14, 20, 34, 0.95);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 8px 14px;
+    align-items: center;
+    gap: 16px;
     font-family: var(--font-mono);
+    font-size: 0.7rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.ins-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ins-col.flex-wide {
+    flex: 1;
+}
+
+.ins-label {
+    font-size: 0.58rem;
     font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+}
+
+.ins-val-token {
+    color: var(--cyber-cyan);
+    font-weight: 700;
+    font-size: 0.8rem;
+    background: rgba(0, 242, 254, 0.1);
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 242, 254, 0.25);
+    width: fit-content;
+}
+
+.ins-val-prob {
+    color: var(--nvidia-green);
+    font-weight: 700;
+    font-size: 0.8rem;
+}
+
+.ins-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.ins-chip {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    color: #cbd5e1;
+}
+
+.ins-chip.top-match {
+    background: rgba(118, 185, 0, 0.15);
+    border-color: rgba(118, 185, 0, 0.4);
+    color: var(--nvidia-green);
+    font-weight: 600;
+}
+
+.ins-val-target {
+    color: #c084fc;
+    font-weight: 600;
+    font-size: 0.72rem;
+    background: rgba(192, 132, 252, 0.1);
+    border: 1px solid rgba(192, 132, 252, 0.25);
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+/* Streaming Blinking Terminal Cursor */
+.streaming-cursor {
+    display: inline-block;
+    color: var(--nvidia-green);
+    font-weight: 700;
+    animation: cursorBlink 0.8s infinite;
+    margin-left: 2px;
+}
+
+@keyframes cursorBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
 }
 
 .terminal-output {
