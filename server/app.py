@@ -38,6 +38,7 @@ DASHBOARD_DIR = ROOT_DIR / "dashboard"
 app.mount("/static", StaticFiles(directory=str(DASHBOARD_DIR)), name="static")
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/index.html", response_class=HTMLResponse)
 async def serve_dashboard():
     index_file = DASHBOARD_DIR / "index.html"
     return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
