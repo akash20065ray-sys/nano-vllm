@@ -205,11 +205,11 @@ async def generate_stream(req: PromptRequest):
             "    block_offset = token_index % 16\n"
             "    return torch.matmul(query_tensor, key_cache_pool[physical_block_id, :, :, block_offset, :])\n"
         )
-    elif "vit" in p_lower or "syllabus" in p_lower or "pune" in p_lower:
+    elif "paging" in p_lower or "memory" in p_lower or "cache" in p_lower:
         response_text = (
-            "The VIT Pune Artificial Intelligence & Data Science department curriculum integrates "
-            "High-Performance Computing, Parallel GPU Programming with CUDA, and Scalable Model Serving. "
-            "Students implement virtual memory pagination, memory-coalesced tensor layouts, and custom KV-cache managers."
+            "PagedAttention decomposes contiguous token Key/Value tensors into 16-token physical blocks. "
+            "Logical page tables map each sequence's logical token positions into physical block indices, "
+            "completely eliminating external memory fragmentation and enabling zero-copy prompt prefix reuse."
         )
     elif "cuda" in p_lower or "kernel" in p_lower:
         response_text = (
