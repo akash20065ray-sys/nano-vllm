@@ -21,9 +21,9 @@ The architecture of MicroServe-LLM is **completely hardware-agnostic**:
 
 | Environment | KV Tensor Storage | Execution Mode | Max Tested Concurrency |
 | :--- | :--- | :--- | :--- |
-| **NVIDIA RTX 3050 (4GB VRAM)** *(Local Dev)* | CUDA VRAM (`cuda:0`) | Real Model (`Qwen2.5-0.5B`) + Sim Mode | 16–32 active streams |
+| **NVIDIA RTX 3050 (4GB VRAM)** *(Local Dev)* | CUDA VRAM (`cuda:0`) | Real Model (`Qwen2.5-0.5B`) + Sim Mode | 16-32 active streams |
 | **NVIDIA RTX 4090 / A100 / H100** *(Enterprise)* | CUDA VRAM (`cuda:0`) | Real Model (`Qwen2.5-7B` / `Llama-3-8B`) | 128+ active streams |
-| **CPU Fallback** *(Any PC / Mac / CI Server)* | Host RAM (`cpu`) | Simulation Mode + Tiny Real Model | 8–16 active streams |
+| **CPU Fallback** *(Any PC / Mac / CI Server)* | Host RAM (`cpu`) | Simulation Mode + Tiny Real Model | 8-16 active streams |
 
 ---
 

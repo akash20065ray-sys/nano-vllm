@@ -28,7 +28,7 @@ $$\text{Attention}(Q_t, K_{\le t}, V_{\le t}) = \text{softmax}\left(\frac{Q_t K_
 ### 2.2 The KV-Cache Memory Footprint Formula
 $$\text{KV Memory per Token} = 2 \times n_{\text{layers}} \times n_{\text{heads}} \times d_{\text{head}} \times \text{bytes\_per\_element}$$
 
-* For a compact 0.5B–1B model (e.g., 24 layers, 16 heads, 64 dim, FP16 = 2 bytes):  
+* For a compact 0.5B-1B model (e.g., 24 layers, 16 heads, 64 dim, FP16 = 2 bytes):  
   **$\approx 98.3 \text{ KB}$ per token.**
 * For 100 concurrent requests of context length 1,024:  
   **$\approx 9.8 \text{ GB}$ of VRAM** solely for KV cache!

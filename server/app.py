@@ -19,6 +19,7 @@ from core.block_manager import BlockAllocator
 from core.page_table import PageTable
 from core.prefix_cache import PrefixCache
 from core.engine import NanoVLLMEngine
+from core.scheduler import ContinuousScheduler
 
 app = FastAPI(title="nano-vllm Observability Server", version="1.0.0")
 

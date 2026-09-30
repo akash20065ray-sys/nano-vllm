@@ -3,33 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MicroServe-LLM | GPU VRAM Systems Observability Dashboard</title>
+    <title>nano-vllm | Systems Observability & VRAM Matrix</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <!-- Top System Telemetry Navigation Bar -->
     <header class="app-header">
         <div class="header-branding">
-            <div class="nvidia-badge">
+            <div class="nvidia-badge" id="hwBadge">
                 <span class="pulse-dot"></span>
-                <span class="badge-text">NVIDIA HARDWARE ACCELERATED</span>
+                <span class="badge-text" id="hwBadgeText">COMPUTE ENGINE</span>
             </div>
-            <h1>MicroServe-LLM <span class="header-sub">| Systems Observability & VRAM Matrix</span></h1>
+            <h1>nano-vllm <span class="header-sub">| Systems Observability & VRAM Matrix</span></h1>
         </div>
 
         <div class="header-controls">
             <div class="system-chip" id="deviceChip">
                 <span class="chip-label">DEVICE:</span>
-                <span class="chip-val" id="deviceVal">CUDA:0 (RTX 3050)</span>
+                <span class="chip-val" id="deviceVal">Host CPU</span>
             </div>
             <div class="system-chip" id="modelChip">
                 <span class="chip-label">MODEL:</span>
                 <select id="engineModeSelect" class="chip-select">
-                    <option value="neural" selected>🧠 SmolLM-135M (Real Neural Weights)</option>
-                    <option value="simulation">⚡ Simulation Mode (Instant)</option>
+                    <option value="neural" selected>SmolLM-135M (Neural Weights)</option>
+                    <option value="simulation">Simulation Mode (Synthetic)</option>
                 </select>
             </div>
             <div class="system-chip" id="blockSizeChip">
@@ -58,10 +58,10 @@
                     <span class="metric-tag tag-compute">PREFILL</span>
                 </div>
                 <div class="metric-body">
-                    <span class="metric-value" id="valTTFT">--</span>
+                    <span class="metric-value" id="valTTFT">0.0</span>
                     <span class="metric-unit">ms</span>
                 </div>
-                <div class="metric-footer" id="subTTFT">Prefix hit: 0ms compute</div>
+                <div class="metric-footer" id="subTTFT">Prefix hit: 0.0ms compute</div>
             </div>
 
             <div class="metric-card" id="cardITL">
@@ -70,7 +70,7 @@
                     <span class="metric-tag tag-memory">DECODE</span>
                 </div>
                 <div class="metric-body">
-                    <span class="metric-value" id="valITL">--</span>
+                    <span class="metric-value" id="valITL">0.0</span>
                     <span class="metric-unit">ms</span>
                 </div>
                 <div class="metric-footer" id="subITL">Memory-bandwidth bound</div>
@@ -140,19 +140,19 @@
                     </div>
                 </div>
 
-                <!-- Interactive Failure-Injection & Experimentation Toolbar -->
+                <!-- Interactive Experimentation & Stress Toolbar -->
                 <div class="experiment-toolbar">
                     <button class="btn btn-outline" id="btnSharedPrefix">
-                        <span class="btn-icon">⚡</span> Test Prefix Cache Hit
+                        <span class="btn-text">Test Prefix Cache Hit</span>
                     </button>
                     <button class="btn btn-warning" id="btnStressPressure">
-                        <span class="btn-icon">🔥</span> Simulate VRAM Exhaustion
+                        <span class="btn-text">Simulate Memory Saturation</span>
                     </button>
                     <button class="btn btn-secondary" id="btnReclaimAll">
-                        <span class="btn-icon">🧹</span> Free All Memory
+                        <span class="btn-text">Reclaim All Memory</span>
                     </button>
                     <button class="btn btn-primary" id="btnRunBenchmark">
-                        <span class="btn-icon">📊</span> Run Quick Benchmark
+                        <span class="btn-text">Run Benchmark Suite</span>
                     </button>
                 </div>
             </section>
@@ -177,7 +177,7 @@
 
                 <!-- Textarea -->
                 <div class="prompt-input-wrapper">
-                    <textarea id="promptInput" rows="3" placeholder="Enter prompt instructions or query... (Real-time memory estimation updates as you type)"></textarea>
+                    <textarea id="promptInput" rows="3" placeholder="Enter prompt instructions or query (real-time memory estimation updates as you type)"></textarea>
                     <div class="prompt-action-bar">
                         <span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
                         <button class="btn btn-generate" id="btnSubmitPrompt">
@@ -193,22 +193,19 @@
                 <div class="live-typing-hud" id="liveTypingHud">
                     <div class="hud-item">
                         <span class="hud-dot live-pulse"></span>
-                        <span class="hud-label">LIVE TOKENS:</span>
+                        <span class="hud-label">EST. TOKENS:</span>
                         <span class="hud-val" id="liveTokenCount">0</span>
                     </div>
                     <div class="hud-item">
-                        <span class="hud-icon">📦</span>
                         <span class="hud-label">BLOCKS:</span>
                         <span class="hud-val" id="liveBlockCount">0</span>
-                        <span class="hud-sub">(16/blk)</span>
+                        <span class="hud-sub">(16 tok/blk)</span>
                     </div>
                     <div class="hud-item">
-                        <span class="hud-icon">⚡</span>
                         <span class="hud-label">PREFIX:</span>
                         <span class="hud-badge badge-cold" id="livePrefixStatus">COLD</span>
                     </div>
                     <div class="hud-item">
-                        <span class="hud-icon">🧩</span>
                         <span class="hud-label">TRAILING:</span>
                         <span class="hud-val" id="liveTrailingFill">0/16 (0%)</span>
                     </div>
@@ -223,28 +220,28 @@
                             <span class="dot green"></span>
                         </div>
                         <span class="terminal-label" id="terminalStatus">Awaiting prompt input...</span>
-                        <span class="terminal-speed" id="streamSpeedHud">0 tok/s</span>
+                        <span class="terminal-speed" id="streamSpeedHud">0.0 tok/s</span>
                     </div>
 
                     <!-- Autoregressive Token Prediction Inspector -->
                     <div class="autoregressive-inspector" id="autoregressiveInspector">
                         <div class="ins-col">
                             <span class="ins-label">ACTIVE TOKEN</span>
-                            <span class="ins-val-token" id="insToken">--</span>
+                            <span class="ins-val-token" id="insToken">N/A</span>
                         </div>
                         <div class="ins-col">
                             <span class="ins-label">CONFIDENCE</span>
-                            <span class="ins-val-prob" id="insProb">--%</span>
+                            <span class="ins-val-prob" id="insProb">0.0%</span>
                         </div>
                         <div class="ins-col flex-wide">
                             <span class="ins-label">TOP-3 LOGITS / PROBABILITIES</span>
                             <div class="ins-chips" id="insChips">
-                                <span class="ins-chip">Softmax P(w) distribution...</span>
+                                <span class="ins-chip">Softmax P(w) distribution</span>
                             </div>
                         </div>
                         <div class="ins-col">
                             <span class="ins-label">VRAM TARGET</span>
-                            <span class="ins-val-target" id="insTarget">Block --, Slot --</span>
+                            <span class="ins-val-target" id="insTarget">Block N/A, Slot N/A</span>
                         </div>
                     </div>
 
@@ -255,11 +252,11 @@
             </section>
         </div>
 
-        <!-- Bottom: "Why Did My Request Slow Down?" Request Diagnostics Inspector -->
+        <!-- Bottom: Request Diagnostics Inspector -->
         <section class="panel-diagnostics">
             <div class="panel-header">
                 <div class="panel-title-group">
-                    <h2>"Why Did My Request Slow Down?" | Request Diagnostics Inspector</h2>
+                    <h2>Sequence Diagnostics & Latency Profiler</h2>
                     <span class="panel-subtitle">Per-sequence latency breakdowns, cache hit attribution, and preemption logs</span>
                 </div>
                 <div class="filter-group">

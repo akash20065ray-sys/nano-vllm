@@ -4,17 +4,17 @@
    ========================================================================= */
 
 :root {
-    --bg-dark: #080a0f;
+    --bg-dark: #090d16;
     --bg-surface: rgba(15, 23, 42, 0.75);
     --bg-surface-elevated: rgba(30, 41, 59, 0.85);
     --border-color: rgba(118, 185, 0, 0.25);
     --border-subtle: rgba(255, 255, 255, 0.08);
 
     --nvidia-green: #76b900;
-    --nvidia-green-glow: rgba(118, 185, 0, 0.4);
-    --cyber-cyan: #00f2fe;
-    --prefix-purple: #a855f7;
-    --prefix-purple-glow: rgba(168, 85, 247, 0.4);
+    --nvidia-green-glow: rgba(118, 185, 0, 0.25);
+    --cyber-cyan: #0284c7;
+    --prefix-blue: #0284c7;
+    --prefix-blue-glow: rgba(2, 132, 199, 0.25);
     --alert-red: #ef4444;
     --alert-orange: #f59e0b;
     --text-primary: #f8fafc;
@@ -23,10 +23,10 @@
 
     --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
-    --transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --transition: all 0.15s ease-out;
 }
 
 * {
@@ -38,11 +38,9 @@
 body {
     background-color: var(--bg-dark);
     background-image: 
-        radial-gradient(circle at 15% 15%, rgba(118, 185, 0, 0.06) 0%, transparent 40%),
-        radial-gradient(circle at 85% 85%, rgba(168, 85, 247, 0.05) 0%, transparent 45%),
-        linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 32px 32px;
     color: var(--text-primary);
     font-family: var(--font-ui);
     min-height: 100vh;
@@ -77,10 +75,10 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(118, 185, 0, 0.12);
+    background: rgba(118, 185, 0, 0.1);
     border: 1px solid rgba(118, 185, 0, 0.3);
-    padding: 2px 8px;
-    border-radius: 20px;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
     width: fit-content;
 }
 
@@ -251,7 +249,7 @@ body {
 .tag-memory  { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
 .tag-green   { background: rgba(118, 185, 0, 0.15); color: var(--nvidia-green); }
 .tag-savings { background: rgba(16, 185, 129, 0.15); color: #34d399; }
-.tag-blue    { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+.tag-blue    { background: rgba(2, 132, 199, 0.15); color: #38bdf8; }
 
 .metric-body {
     display: flex;
@@ -341,7 +339,7 @@ body {
 .legend-box.free { background: #1a2234; border-color: #26334d; }
 .legend-box.preview { background: rgba(0, 242, 254, 0.2); border: 1px dashed var(--cyber-cyan); box-shadow: 0 0 6px rgba(0, 242, 254, 0.4); }
 .legend-box.active { background: var(--nvidia-green); box-shadow: 0 0 6px var(--nvidia-green-glow); }
-.legend-box.shared { background: var(--prefix-purple); box-shadow: 0 0 6px var(--prefix-purple-glow); }
+.legend-box.shared { background: var(--prefix-blue); border-color: #38bdf8; }
 .legend-box.pressure { background: var(--alert-red); box-shadow: 0 0 6px rgba(239, 68, 68, 0.4); }
 
 /* VRAM 2D Block Matrix Grid */
@@ -462,21 +460,20 @@ body {
 }
 
 .block-cell.state-shared {
-    background: linear-gradient(135deg, #a855f7, #6b21a8);
-    border-color: #c084fc;
+    background: #0369a1;
+    border-color: #38bdf8;
     color: #ffffff;
     font-weight: 700;
-    box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
 }
 .block-cell.state-shared .block-fill-track {
-    background: rgba(0, 0, 0, 0.3);
+    background: rgba(0, 0, 0, 0.35);
 }
 .block-cell.state-shared .block-fill-bar {
-    background: #f0abfc;
+    background: #38bdf8;
 }
 
 .block-cell.state-pressure {
-    background: linear-gradient(135deg, #ef4444, #991b1b);
+    background: #991b1b;
     border-color: #f87171;
     color: #ffffff;
     font-weight: 700;
@@ -528,13 +525,13 @@ body {
 }
 
 .btn-outline {
-    background: rgba(168, 85, 247, 0.12);
-    border: 1px solid var(--prefix-purple);
-    color: #d8b4fe;
+    background: rgba(2, 132, 199, 0.12);
+    border: 1px solid var(--prefix-blue);
+    color: #7dd3fc;
 }
 .btn-outline:hover {
-    background: rgba(168, 85, 247, 0.25);
-    box-shadow: 0 0 10px var(--prefix-purple-glow);
+    background: rgba(2, 132, 199, 0.22);
+    box-shadow: 0 0 10px var(--prefix-blue-glow);
 }
 
 .btn-warning {
@@ -722,9 +719,9 @@ body {
 }
 
 .hud-badge.badge-hit {
-    background: rgba(168, 85, 247, 0.25);
-    color: #d8b4fe;
-    border: 1px solid var(--prefix-purple);
+    background: rgba(2, 132, 199, 0.2);
+    color: #7dd3fc;
+    border: 1px solid var(--prefix-blue);
 }
 
 .hud-badge.badge-cold {
