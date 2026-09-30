@@ -1,0 +1,99 @@
+{
+  "timestamp": "2026-09-30 21:11:41",
+  "hardware": "Local Host Compute / CUDA Architecture",
+  "baselines": {
+    "baseline_1_static": {
+      "name": "Baseline 1: Static Contiguous",
+      "throughput_tps": 817.15,
+      "total_tokens": 2306,
+      "mean_itl_ms": 3.43,
+      "mean_ttft_ms": 14.39,
+      "fragmentation_pct": 73.02,
+      "total_time_s": 2.822
+    },
+    "baseline_2_paged": {
+      "name": "Baseline 2: Paged KV-Cache",
+      "throughput_tps": 3845.26,
+      "total_tokens": 2306,
+      "mean_itl_ms": 0.55,
+      "mean_ttft_ms": 1.37,
+      "fragmentation_pct": 5.22,
+      "total_time_s": 0.6
+    },
+    "baseline_3_prefix_cache": {
+      "name": "Baseline 3: Paged + Prefix Cache",
+      "throughput_tps": 5089.16,
+      "total_tokens": 2306,
+      "mean_itl_ms": 0.35,
+      "mean_ttft_ms": 0.84,
+      "cache_hit_rate_pct": 142.19,
+      "fragmentation_pct": 3.78,
+      "total_time_s": 0.453
+    },
+    "baseline_4_full_engine": {
+      "name": "Baseline 4: Full MicroServe Engine",
+      "throughput_tps": 7743.97,
+      "total_tokens": 2306,
+      "mean_itl_ms": 0.03,
+      "itl_p50_ms": 0.02,
+      "itl_p95_ms": 0.06,
+      "itl_p99_ms": 0.09,
+      "mean_ttft_ms": 0.82,
+      "preemption_count": 6,
+      "fragmentation_pct": 3.42,
+      "total_time_s": 0.298
+    }
+  },
+  "concurrency_sweep": {
+    "concurrencies": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "static_tps": [
+      265.13,
+      414.63,
+      682.76,
+      973.18,
+      866.01,
+      865.05,
+      867.11
+    ],
+    "continuous_tps": [
+      821.92,
+      1375.4,
+      2486.19,
+      4061.37,
+      5581.56,
+      7593.01,
+      7861.15
+    ]
+  },
+  "ablation_study": {
+    "stages": [
+      "Static Buffer",
+      "+ Paged Memory",
+      "+ Prefix Cache",
+      "+ Continuous Batching",
+      "+ Tiered Swap"
+    ],
+    "throughput_tps": [
+      817.15,
+      3845.26,
+      5089.16,
+      7047.01,
+      7743.97
+    ],
+    "fragmentation_pct": [
+      73.02,
+      5.22,
+      3.78,
+      3.42,
+      3.42
+    ]
+  }
+}
