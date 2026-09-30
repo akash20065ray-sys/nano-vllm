@@ -18,21 +18,13 @@ const state = {
     typingDebounceTimer: null
 };
 
-// Preset Prompts
-const PROMPT_PRESETS = {
-    vit_syllabus: "What are the core concepts in the VIT Pune AIDS curriculum for Deep Learning and GPU Systems?",
-    code_kernel: "Write a high-performance Python function for matrix multiplication using nested loops.",
-    explain_paging: "Explain how Virtual Memory Paging and Page Tables eliminate external memory fragmentation.",
-    custom: ""
-};
-
 // =========================================================================
 // Initialization
 // =========================================================================
 document.addEventListener("DOMContentLoaded", () => {
     initBlockMatrix();
     initEventListeners();
-    initPresets();
+    initPromptConsole();
     
     // Check if backend API is online
     checkBackendHealth();
@@ -74,21 +66,23 @@ function initBlockMatrix(blockSize = currentBlockSize) {
     }
 }
 
-function initPresets() {
-    const selector = document.getElementById("promptPreset");
+function initPromptConsole() {
     const input = document.getElementById("promptInput");
+    if (input) {
+        input.value = "";
+        handlePromptTyping();
+    }
     
-    // Set initial preset
-    input.value = PROMPT_PRESETS.vit_syllabus;
-    handlePromptTyping(); // Trigger real-time calculation immediately on load
-
-    selector.addEventListener("change", (e) => {
-        const key = e.target.value;
-        if (PROMPT_PRESETS[key] !== undefined) {
-            input.value = PROMPT_PRESETS[key];
-            handlePromptTyping();
-        }
-    });
+    const clearBtn = document.getElementById("btnClearPrompt");
+    if (clearBtn) {
+        clearBtn.addEventListener("click", () => {
+            if (input) {
+                input.value = "";
+                handlePromptTyping();
+                input.focus();
+            }
+        });
+    }
 }
 
 function initEventListeners() {
@@ -640,8 +634,8 @@ async function streamFromSimulation(req, text, terminal, statusLabel, speedHud) 
 }
 
 function generateMockResponse(prompt) {
-    if (prompt.includes("VIT Pune")) {
-        return "The VIT Pune AIDS curriculum covers Deep Learning Systems, Parallel GPU Computing with CUDA, and High-Throughput Model Serving. Core modules focus on tensor optimizations, memory coalescing, and KV-cache management in modern LLMs.".split(" ");
+    if (prompt.includes("paging") || prompt.includes("virtual memory")) {
+        return "PagedAttention decomposes continuous token key-value activations into non-contiguous physical memory blocks. Logical page tables map contiguous sequence steps into arbitrary physical blocks, completely eliminating external memory fragmentation.".split(" ");
     } else if (prompt.includes("matrix") || prompt.includes("multiplication")) {
         return "def matrix_multiply(A, B):\n    rows_A, cols_A = len(A), len(A[0])\n    rows_B, cols_B = len(B), len(B[0])\n    C = [[0 for _ in range(cols_B)] for _ in range(rows_A)]\n    for i in range(rows_A):\n        for j in range(cols_B):\n            for k in range(cols_A):\n                C[i][j] += A[i][k] * B[k][j]\n    return C".split(" ");
     } else {

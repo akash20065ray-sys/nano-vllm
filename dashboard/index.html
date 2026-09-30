@@ -164,24 +164,19 @@
                     <span class="badge-mode" id="engineModeBadge">MODE: REAL-TIME SERVER</span>
                 </div>
 
-                <!-- Prompt Preset Selector -->
-                <div class="preset-selector-group">
-                    <label for="promptPreset">Prompt Preset:</label>
-                    <select id="promptPreset" class="dropdown-presets">
-                        <option value="vit_syllabus">VIT Pune Syllabus Query (Shared Prefix)</option>
-                        <option value="code_kernel">Write CUDA Matrix Multiplication Kernel</option>
-                        <option value="explain_paging">Explain PagedAttention Memory Architecture</option>
-                        <option value="custom">Custom Prompt...</option>
-                    </select>
+                <!-- Prompt Console -->
+                <div class="prompt-header-bar">
+                    <label for="promptInput" class="prompt-input-label">Prompt Input Console</label>
+                    <button class="btn-clear-prompt" id="btnClearPrompt" type="button" title="Clear input text">Clear</button>
                 </div>
 
                 <!-- Textarea -->
                 <div class="prompt-input-wrapper">
-                    <textarea id="promptInput" rows="3" placeholder="Enter prompt instructions or query (real-time memory estimation updates as you type)"></textarea>
+                    <textarea id="promptInput" rows="3" placeholder="Enter any prompt to execute inference and track VRAM allocation..."></textarea>
                     <div class="prompt-action-bar">
-                        <span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
+                        <span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run</span>
                         <button class="btn btn-generate" id="btnSubmitPrompt">
-                            <span>Send Request</span>
+                            <span>Generate Tokens</span>
                             <svg class="send-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                 <path d="M5 12h14M12 5l7 7-7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
