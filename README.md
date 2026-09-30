@@ -6,7 +6,8 @@
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![Transformers](https://img.shields.io/badge/HuggingFace-Transformers-yellow.svg)](https://huggingface.co/docs/transformers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 18 Passed](https://img.shields.io/badge/Tests-18%20Passed-brightgreen.svg)]()
+[![Tests: 21 Passed](https://img.shields.io/badge/Tests-21%20Passed-brightgreen.svg)](tests/)
+[![Benchmark: 4 Baselines](https://img.shields.io/badge/Benchmark-4%20Baselines%20Verified-blue.svg)](benchmark/)
 
 ---
 
