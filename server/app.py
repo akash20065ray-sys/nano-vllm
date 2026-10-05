@@ -53,6 +53,13 @@ async def serve_app_js():
     js_file = DASHBOARD_DIR / "app.js"
     return HTMLResponse(content=js_file.read_text(encoding="utf-8"), media_type="application/javascript")
 
+@app.get("/sw.js")
+async def serve_sw():
+    return HTMLResponse(
+        content="self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', () => self.registration.unregister());",
+        media_type="application/javascript"
+    )
+
 @app.get("/api/health")
 async def health_check():
     device_name = "CUDA:0 (RTX 3050)" if torch.cuda.is_available() else "Host CPU"

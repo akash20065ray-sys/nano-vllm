@@ -335,6 +335,13 @@
         </div>
     </div>
 
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(registrations => {
+                for (let r of registrations) r.unregister();
+            });
+        }
+    </script>
     <script src="app.js"></script>
 </body>
 </html>
