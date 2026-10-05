@@ -25,6 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initBlockMatrix();
     initEventListeners();
     initPromptConsole();
+    initMultiPromptConsole();
     
     // Check if backend API is online
     checkBackendHealth();
@@ -929,3 +930,406 @@ function closeModal() {
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// =========================================================================
+// Multi-Prompt Concurrent Batch Console
+// =========================================================================
+
+const DEFAULT_MULTI_PROMPTS = [
+    { prompt: "Explain how virtual memory paging eliminates external memory fragmentation.", maxTokens: 32 },
+    { prompt: "What is the difference between CPU cache lines and GPU memory coalescing?", maxTokens: 24 },
+    { prompt: "Write a high-performance Python function for binary search.", maxTokens: 28 },
+    { prompt: "Explain how Copy-On-Write enables zero-copy prompt prefix sharing across LLM requests.", maxTokens: 30 }
+];
+
+let multiPromptsList = [...DEFAULT_MULTI_PROMPTS];
+
+function escapeHtml(str) {
+    if (!str) return "";
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function initMultiPromptConsole() {
+    const tabSingleMode = document.getElementById("tabSingleMode");
+    const tabBatchMode = document.getElementById("tabBatchMode");
+    const singleContainer = document.getElementById("singlePromptContainer");
+    const multiContainer = document.getElementById("multiPromptContainer");
+    const terminalOutput = document.getElementById("terminalOutput");
+    const multiStreamGrid = document.getElementById("multiStreamGrid");
+    const autoregressiveInspector = document.getElementById("autoregressiveInspector");
+
+    if (tabSingleMode && tabBatchMode) {
+        tabSingleMode.addEventListener("click", () => {
+            tabSingleMode.classList.add("active");
+            tabBatchMode.classList.remove("active");
+            if (singleContainer) singleContainer.classList.remove("hidden");
+            if (multiContainer) multiContainer.classList.add("hidden");
+            if (terminalOutput) terminalOutput.classList.remove("hidden");
+            if (multiStreamGrid) multiStreamGrid.classList.add("hidden");
+            if (autoregressiveInspector) autoregressiveInspector.classList.remove("hidden");
+            handlePromptTyping();
+        });
+
+        tabBatchMode.addEventListener("click", () => {
+            tabBatchMode.classList.add("active");
+            tabSingleMode.classList.remove("active");
+            if (singleContainer) singleContainer.classList.add("hidden");
+            if (multiContainer) multiContainer.classList.remove("hidden");
+            if (terminalOutput) terminalOutput.classList.add("hidden");
+            if (multiStreamGrid) multiStreamGrid.classList.remove("hidden");
+            if (autoregressiveInspector) autoregressiveInspector.classList.add("hidden");
+            // Clear preview blocks
+            state.blocks.forEach(b => {
+                if (b.status === "preview") {
+                    b.status = "free";
+                    b.tokensOccupied = 0;
+                    updateBlockCell(b.id);
+                }
+            });
+        });
+    }
+
+    const btnAddPromptRow = document.getElementById("btnAddPromptRow");
+    if (btnAddPromptRow) {
+        btnAddPromptRow.addEventListener("click", () => {
+            multiPromptsList.push({
+                prompt: "Explain PagedAttention KV cache address translation...",
+                maxTokens: 24
+            });
+            renderMultiPromptList();
+        });
+    }
+
+    const btnResetMultiPrompts = document.getElementById("btnResetMultiPrompts");
+    if (btnResetMultiPrompts) {
+        btnResetMultiPrompts.addEventListener("click", () => {
+            multiPromptsList = [...DEFAULT_MULTI_PROMPTS];
+            renderMultiPromptList();
+        });
+    }
+
+    const btnRunConcurrentBatch = document.getElementById("btnRunConcurrentBatch");
+    if (btnRunConcurrentBatch) {
+        btnRunConcurrentBatch.addEventListener("click", runConcurrentBatchInDashboard);
+    }
+
+    renderMultiPromptList();
+}
+
+function renderMultiPromptList() {
+    const container = document.getElementById("multiPromptList");
+    if (!container) return;
+    container.innerHTML = "";
+
+    multiPromptsList.forEach((item, index) => {
+        const row = document.createElement("div");
+        row.className = "multi-prompt-row";
+        row.innerHTML = `
+            <span class="seq-badge">#${index + 1}</span>
+            <input type="text" value="${escapeHtml(item.prompt)}" data-index="${index}" class="prompt-text-input" placeholder="Prompt text...">
+            <div class="max-tok-wrapper">
+                <span>Max:</span>
+                <input type="number" value="${item.maxTokens}" min="8" max="128" data-index="${index}" class="max-tok-input">
+                <span>tok</span>
+            </div>
+            <button class="btn-remove-row" data-index="${index}" title="Remove stream" ${multiPromptsList.length <= 1 ? "disabled" : ""}>&times;</button>
+        `;
+
+        const textInput = row.querySelector(".prompt-text-input");
+        textInput.addEventListener("input", (e) => {
+            multiPromptsList[index].prompt = e.target.value;
+        });
+
+        const tokInput = row.querySelector(".max-tok-input");
+        tokInput.addEventListener("input", (e) => {
+            multiPromptsList[index].maxTokens = parseInt(e.target.value, 10) || 24;
+        });
+
+        const delBtn = row.querySelector(".btn-remove-row");
+        delBtn.addEventListener("click", () => {
+            if (multiPromptsList.length > 1) {
+                multiPromptsList.splice(index, 1);
+                renderMultiPromptList();
+            }
+        });
+
+        container.appendChild(row);
+    });
+}
+
+async function runConcurrentBatchInDashboard() {
+    if (state.isStreaming) return;
+    state.isStreaming = true;
+
+    const statusLabel = document.getElementById("terminalStatus");
+    const speedHud = document.getElementById("streamSpeedHud");
+    const multiStreamGrid = document.getElementById("multiStreamGrid");
+    const runBtn = document.getElementById("btnRunConcurrentBatch");
+
+    if (runBtn) runBtn.disabled = true;
+    multiStreamGrid.innerHTML = "";
+    statusLabel.innerText = `Dispatching ${multiPromptsList.length} concurrent streams to continuous scheduler...`;
+
+    // Clear typing preview blocks
+    state.blocks.forEach(b => {
+        if (b.status === "preview") {
+            b.status = "free";
+            b.tokensOccupied = 0;
+            updateBlockCell(b.id);
+        }
+    });
+
+    const activeStreams = [];
+    const t0Global = performance.now();
+
+    multiPromptsList.forEach((item, idx) => {
+        const seqId = state.activeSeqIdCounter++;
+        const card = document.createElement("div");
+        card.className = "stream-card running";
+        card.id = `stream-card-${seqId}`;
+        card.innerHTML = `
+            <div class="stream-card-header">
+                <span class="stream-card-seq">STREAM #${seqId} (QUEUE #${idx + 1})</span>
+                <span class="stream-card-status badge-running" id="card-status-${seqId}">RUNNING</span>
+            </div>
+            <div class="stream-card-prompt" title="${escapeHtml(item.prompt)}">"${escapeHtml(item.prompt)}"</div>
+            <div class="stream-card-body" id="card-body-${seqId}"><span class="streaming-cursor">█</span></div>
+            <div class="stream-card-footer">
+                <span id="card-tok-${seqId}">0 / ${item.maxTokens} tok</span>
+                <span id="card-ttft-${seqId}">TTFT: --</span>
+            </div>
+        `;
+        multiStreamGrid.appendChild(card);
+
+        const req = {
+            seqId: seqId,
+            status: "RUNNING",
+            promptText: item.prompt,
+            promptTokens: Math.ceil(item.prompt.length / 4),
+            generatedTokens: 0,
+            queueLatencyMs: (idx * 0.4).toFixed(1),
+            ttftMs: null,
+            meanItlMs: null,
+            prefixHit: false,
+            preempted: false,
+            allocatedBlocks: []
+        };
+        state.requests.unshift(req);
+
+        activeStreams.push({
+            req,
+            item,
+            cardEl: card,
+            cardBody: card.querySelector(`#card-body-${seqId}`),
+            cardStatus: card.querySelector(`#card-status-${seqId}`),
+            cardTok: card.querySelector(`#card-tok-${seqId}`),
+            cardTtft: card.querySelector(`#card-ttft-${seqId}`)
+        });
+    });
+
+    renderDiagnosticsTable();
+    updateTelemetryHUD();
+
+    // Execute all streams concurrently
+    try {
+        await Promise.all(activeStreams.map(stream => streamConcurrentSequence(stream)));
+    } catch (err) {
+        console.warn("Concurrent batch execution completed with warning:", err);
+    }
+
+    const totalElapsedSec = ((performance.now() - t0Global) / 1000).toFixed(2);
+    const totalGenTokens = activeStreams.reduce((sum, s) => sum + s.req.generatedTokens, 0);
+    const aggregateTps = totalElapsedSec > 0 ? (totalGenTokens / totalElapsedSec).toFixed(1) : "0.0";
+
+    statusLabel.innerText = `Batch complete: ${activeStreams.length} sequences executed in ${totalElapsedSec}s (${aggregateTps} tok/s throughput).`;
+    speedHud.innerText = `${aggregateTps} tok/s`;
+    document.getElementById("valTPS").innerText = aggregateTps;
+
+    if (runBtn) runBtn.disabled = false;
+    state.isStreaming = false;
+    renderDiagnosticsTable();
+    updateTelemetryHUD();
+}
+
+async function streamConcurrentSequence(stream) {
+    const { req, item, cardEl, cardBody, cardStatus, cardTok, cardTtft } = stream;
+    let accumulatedText = "";
+
+    if (backendOnline) {
+        try {
+            const response = await fetch("/api/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt: item.prompt,
+                    max_tokens: item.maxTokens,
+                    engine_mode: currentEngineMode
+                })
+            });
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n\n");
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith("data: ")) continue;
+                    let event;
+                    try {
+                        event = JSON.parse(trimmed.slice(6));
+                    } catch {
+                        continue;
+                    }
+
+                    if (event.type === "start") {
+                        req.ttftMs = event.ttft_ms;
+                        req.prefixHit = event.prefix_hit;
+                        if (cardTtft) cardTtft.innerText = `TTFT: ${event.ttft_ms}ms`;
+
+                        if (event.allocated_blocks) {
+                            event.allocated_blocks.forEach(bid => {
+                                if (bid >= 0 && bid < TOTAL_BLOCKS) {
+                                    const b = state.blocks[bid];
+                                    b.status = "active";
+                                    b.seqId = req.seqId;
+                                    b.tokensOccupied = currentBlockSize;
+                                    if (!req.allocatedBlocks.includes(bid)) req.allocatedBlocks.push(bid);
+                                    updateBlockCell(bid, true);
+                                }
+                            });
+                        }
+                    } else if (event.type === "token") {
+                        accumulatedText += event.token;
+                        req.generatedTokens++;
+                        cardBody.innerHTML = escapeHtml(accumulatedText) + '<span class="streaming-cursor">█</span>';
+                        cardBody.scrollTop = cardBody.scrollHeight;
+                        if (cardTok) cardTok.innerText = `${req.generatedTokens} / ${item.maxTokens} tok`;
+
+                        const bid = event.physical_block_id;
+                        if (bid !== undefined && bid >= 0 && bid < TOTAL_BLOCKS) {
+                            const b = state.blocks[bid];
+                            b.status = "active";
+                            b.seqId = req.seqId;
+                            b.tokensOccupied = event.block_offset + 1;
+                            if (!req.allocatedBlocks.includes(bid)) req.allocatedBlocks.push(bid);
+                            updateBlockCell(bid, true);
+                        }
+                    } else if (event.type === "done") {
+                        cardBody.innerHTML = escapeHtml(accumulatedText);
+                        req.status = "COMPLETED";
+                        req.meanItlMs = event.mean_itl_ms;
+                        cardStatus.innerText = "COMPLETED";
+                        cardStatus.className = "stream-card-status badge-completed";
+                        cardEl.classList.remove("running");
+                        cardEl.classList.add("completed");
+                        renderDiagnosticsTable();
+                        updateTelemetryHUD();
+                        return;
+                    }
+                }
+            }
+            // In case stream ended cleanly
+            cardBody.innerHTML = escapeHtml(accumulatedText);
+            req.status = "COMPLETED";
+            cardStatus.innerText = "COMPLETED";
+            cardStatus.className = "stream-card-status badge-completed";
+            cardEl.classList.remove("running");
+            cardEl.classList.add("completed");
+            return;
+        } catch (err) {
+            console.warn(`Backend stream failed for Req #${req.seqId}, falling back to simulation:`, err);
+        }
+    }
+
+    // High-fidelity fallback / simulation mode
+    await simulateConcurrentSequenceStream(stream);
+}
+
+async function simulateConcurrentSequenceStream(stream) {
+    const { req, item, cardEl, cardBody, cardStatus, cardTok, cardTtft } = stream;
+    const promptClean = item.prompt.toLowerCase();
+
+    let tokensToGenerate = [];
+    if (promptClean.includes("paging") || promptClean.includes("fragmentation") || promptClean.includes("virtual")) {
+        tokensToGenerate = "Virtual memory paging partitions logical address spaces into fixed-size physical pages, completely eliminating external memory fragmentation while page tables translate addresses dynamically.".split(" ");
+    } else if (promptClean.includes("coalescing") || promptClean.includes("cache") || promptClean.includes("gpu")) {
+        tokensToGenerate = "GPU memory coalescing merges adjacent thread memory loads into single 128-byte transactions, maximizing DRAM bus bandwidth and avoiding compute stalls.".split(" ");
+    } else if (promptClean.includes("binary") || promptClean.includes("python") || promptClean.includes("search")) {
+        tokensToGenerate = "def binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        mid = (low + high) // 2\n        if arr[mid] == target: return mid\n    return -1".split(" ");
+    } else {
+        tokensToGenerate = "Copy-On-Write allows multiple generation streams to share immutable prompt KV blocks with atomic reference counting, duplicating pages only when child sequences mutate attention slots.".split(" ");
+    }
+
+    const maxTokens = Math.min(item.maxTokens, tokensToGenerate.length);
+    req.ttftMs = (1.2 + Math.random() * 2.0).toFixed(1);
+    if (cardTtft) cardTtft.innerText = `TTFT: ${req.ttftMs}ms`;
+
+    // Allocate initial prompt block
+    try {
+        const pBlock = allocateBlock(req.seqId, false);
+        req.allocatedBlocks.push(pBlock);
+    } catch {
+        // Handled
+    }
+
+    let accumulatedWords = [];
+    for (let i = 0; i < maxTokens; i++) {
+        await sleep(35 + Math.floor(Math.random() * 25));
+        const word = tokensToGenerate[i] || `token_${i}`;
+        accumulatedWords.push(word);
+        req.generatedTokens++;
+
+        cardBody.innerHTML = escapeHtml(accumulatedWords.join(" ")) + '<span class="streaming-cursor">█</span>';
+        cardBody.scrollTop = cardBody.scrollHeight;
+        if (cardTok) cardTok.innerText = `${req.generatedTokens} / ${item.maxTokens} tok`;
+
+        // Advance slot in physical block
+        if (req.allocatedBlocks.length > 0) {
+            const currentBid = req.allocatedBlocks[req.allocatedBlocks.length - 1];
+            const currentBlock = state.blocks[currentBid];
+            const nextOffset = (currentBlock.tokensOccupied % currentBlockSize) + 1;
+            currentBlock.tokensOccupied = nextOffset;
+            updateBlockCell(currentBid, true);
+
+            // Block full: allocate next block if needed
+            if (nextOffset === currentBlockSize && i < maxTokens - 1) {
+                try {
+                    const nextBid = allocateBlock(req.seqId, false);
+                    req.allocatedBlocks.push(nextBid);
+                } catch {
+                    // Preempt if VRAM full
+                    req.status = "PREEMPTED";
+                    req.preempted = true;
+                    cardStatus.innerText = "PREEMPTED";
+                    cardStatus.className = "stream-card-status";
+                    cardEl.classList.add("preempted");
+                    break;
+                }
+            }
+        }
+    }
+
+    if (req.status !== "PREEMPTED") {
+        req.status = "COMPLETED";
+        req.meanItlMs = (20.0 + Math.random() * 6.0).toFixed(1);
+        cardStatus.innerText = "COMPLETED";
+        cardStatus.className = "stream-card-status badge-completed";
+        cardEl.classList.remove("running");
+        cardEl.classList.add("completed");
+    }
+
+    cardBody.innerHTML = escapeHtml(accumulatedWords.join(" "));
+    renderDiagnosticsTable();
+    updateTelemetryHUD();
+}
+

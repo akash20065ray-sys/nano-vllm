@@ -164,45 +164,77 @@
                     <span class="badge-mode" id="engineModeBadge">MODE: REAL-TIME SERVER</span>
                 </div>
 
-                <!-- Prompt Console -->
-                <div class="prompt-header-bar">
-                    <label for="promptInput" class="prompt-input-label">Prompt Input Console</label>
-                    <button class="btn-clear-prompt" id="btnClearPrompt" type="button" title="Clear input text">Clear</button>
+                <!-- Streamer Mode Tab Bar -->
+                <div class="streamer-tab-bar">
+                    <button class="streamer-tab active" id="tabSingleMode" type="button">Single Prompt</button>
+                    <button class="streamer-tab" id="tabBatchMode" type="button">Concurrent Batch (Multi-Prompt)</button>
                 </div>
 
-                <!-- Textarea -->
-                <div class="prompt-input-wrapper">
-                    <textarea id="promptInput" rows="3" placeholder="Enter any prompt to execute inference and track VRAM allocation..."></textarea>
-                    <div class="prompt-action-bar">
-                        <span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run</span>
-                        <button class="btn btn-generate" id="btnSubmitPrompt">
-                            <span>Generate Tokens</span>
+                <!-- Single Prompt Section -->
+                <div id="singlePromptContainer">
+                    <!-- Prompt Console -->
+                    <div class="prompt-header-bar">
+                        <label for="promptInput" class="prompt-input-label">Prompt Input Console</label>
+                        <button class="btn-clear-prompt" id="btnClearPrompt" type="button" title="Clear input text">Clear</button>
+                    </div>
+
+                    <!-- Textarea -->
+                    <div class="prompt-input-wrapper">
+                        <textarea id="promptInput" rows="3" placeholder="Enter any prompt to execute inference and track VRAM allocation..."></textarea>
+                        <div class="prompt-action-bar">
+                            <span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run</span>
+                            <button class="btn btn-generate" id="btnSubmitPrompt">
+                                <span>Generate Tokens</span>
+                                <svg class="send-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path d="M5 12h14M12 5l7 7-7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Real-Time Typing Memory Estimator HUD -->
+                    <div class="live-typing-hud" id="liveTypingHud">
+                        <div class="hud-item">
+                            <span class="hud-dot live-pulse"></span>
+                            <span class="hud-label">EST. TOKENS:</span>
+                            <span class="hud-val" id="liveTokenCount">0</span>
+                        </div>
+                        <div class="hud-item">
+                            <span class="hud-label">BLOCKS:</span>
+                            <span class="hud-val" id="liveBlockCount">0</span>
+                            <span class="hud-sub">(16 tok/blk)</span>
+                        </div>
+                        <div class="hud-item">
+                            <span class="hud-label">PREFIX:</span>
+                            <span class="hud-badge badge-cold" id="livePrefixStatus">COLD</span>
+                        </div>
+                        <div class="hud-item">
+                            <span class="hud-label">TRAILING:</span>
+                            <span class="hud-val" id="liveTrailingFill">0/16 (0%)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Concurrent Batch Multi-Prompt Section -->
+                <div class="multi-prompt-container hidden" id="multiPromptContainer">
+                    <div class="multi-prompt-header">
+                        <span class="multi-prompt-title">CONCURRENT EXECUTION QUEUE</span>
+                        <div class="multi-prompt-actions">
+                            <button class="btn-sm btn-outline" id="btnAddPromptRow" type="button">+ Add Stream</button>
+                            <button class="btn-sm btn-secondary" id="btnResetMultiPrompts" type="button">Reset</button>
+                        </div>
+                    </div>
+                    <div class="multi-prompt-list" id="multiPromptList">
+                        <!-- Populated dynamically with prompts -->
+                    </div>
+                    <div class="multi-prompt-action-bar">
+                        <span class="keyboard-hint">Runs parallel requests through continuous scheduler</span>
+                        <button class="btn btn-generate" id="btnRunConcurrentBatch" type="button">
+                            <span>Execute Concurrent Batch</span>
                             <svg class="send-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                 <path d="M5 12h14M12 5l7 7-7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </button>
-                    </div>
-                </div>
-
-                <!-- Real-Time Typing Memory Estimator HUD -->
-                <div class="live-typing-hud" id="liveTypingHud">
-                    <div class="hud-item">
-                        <span class="hud-dot live-pulse"></span>
-                        <span class="hud-label">EST. TOKENS:</span>
-                        <span class="hud-val" id="liveTokenCount">0</span>
-                    </div>
-                    <div class="hud-item">
-                        <span class="hud-label">BLOCKS:</span>
-                        <span class="hud-val" id="liveBlockCount">0</span>
-                        <span class="hud-sub">(16 tok/blk)</span>
-                    </div>
-                    <div class="hud-item">
-                        <span class="hud-label">PREFIX:</span>
-                        <span class="hud-badge badge-cold" id="livePrefixStatus">COLD</span>
-                    </div>
-                    <div class="hud-item">
-                        <span class="hud-label">TRAILING:</span>
-                        <span class="hud-val" id="liveTrailingFill">0/16 (0%)</span>
                     </div>
                 </div>
 
@@ -242,6 +274,10 @@
 
                     <div class="terminal-output" id="terminalOutput">
                         <span class="placeholder-text">Generated tokens will stream here in real time...</span>
+                    </div>
+
+                    <div class="multi-stream-grid hidden" id="multiStreamGrid">
+                        <!-- Dynamic multi-stream response cards -->
                     </div>
                 </div>
             </section>
