@@ -339,6 +339,39 @@ async def generate_stream(req: PromptRequest):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+# SpecInfer Engine Instance
+from core.speculative import SpeculativeEngine
+speculative_engine = SpeculativeEngine(
+    allocator=neural_engine.allocator,
+    block_size=BLOCK_SIZE,
+    num_blocks=TOTAL_BLOCKS,
+    k_draft=4,
+    acceptance_threshold=0.82
+)
+
+class SpeculativeRequest(BaseModel):
+    prompt: str
+    max_tokens: int = 36
+    k_draft: int = 4
+
+@app.post("/api/speculative")
+async def generate_speculative_stream_endpoint(req: SpeculativeRequest):
+    """
+    SpecInfer Server-Sent Events (SSE) Stream:
+    Emits candidate proposal trees, Leviathan target verifications,
+    O(1) paged KV rollbacks, and empirical acceleration telemetry.
+    """
+    async def spec_event_generator():
+        for event in speculative_engine.generate_speculative_stream(
+            prompt=req.prompt,
+            max_tokens=req.max_tokens,
+            k_draft=req.k_draft
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
+            await asyncio.sleep(0.05)
+
+    return StreamingResponse(spec_event_generator(), media_type="text/event-stream")
+
 @app.post("/api/reclaim")
 async def reclaim_all():
     for pt in list(neural_engine.active_page_tables.values()):

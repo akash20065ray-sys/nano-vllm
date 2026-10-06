@@ -168,6 +168,7 @@
                 <div class="streamer-tab-bar">
                     <button class="streamer-tab active" id="tabSingleMode" type="button">Single Prompt</button>
                     <button class="streamer-tab" id="tabBatchMode" type="button">Concurrent Batch (Multi-Prompt)</button>
+                    <button class="streamer-tab" id="tabSpecMode" type="button">SpecInfer (Speculative 2.5x)</button>
                 </div>
 
                 <!-- Single Prompt Section -->
@@ -238,6 +239,53 @@
                     </div>
                 </div>
 
+                <!-- SpecInfer Speculative Acceleration Section -->
+                <div class="spec-prompt-container hidden" id="specPromptContainer">
+                    <div class="prompt-header-bar">
+                        <label for="specPromptInput" class="prompt-input-label">SpecInfer Acceleration Console</label>
+                        <span class="hud-badge badge-hit">LEVIATHAN REJECTION SAMPLING</span>
+                    </div>
+                    <div class="prompt-input-wrapper">
+                        <textarea id="specPromptInput" rows="2" placeholder="Enter prompt to evaluate SpecInfer draft vs target verification with O(1) KV rollback...">Explain how virtual memory paging eliminates external memory fragmentation.</textarea>
+                        <div class="prompt-action-bar">
+                            <div class="spec-k-selector">
+                                <span class="keyboard-hint">Draft Window (K):</span>
+                                <select id="specKSelect" class="chip-select-sm">
+                                    <option value="3">K = 3</option>
+                                    <option value="4" selected>K = 4</option>
+                                    <option value="5">K = 5</option>
+                                    <option value="6">K = 6</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-generate" id="btnSubmitSpecPrompt">
+                                <span>Run SpecInfer (2.5x)</span>
+                                <svg class="send-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path d="M5 12h14M12 5l7 7-7 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Speculative Acceleration Telemetry Strip -->
+                    <div class="spec-telemetry-hud" id="specTelemetryHud">
+                        <div class="hud-item">
+                            <span class="hud-label">SPEEDUP:</span>
+                            <span class="hud-val spec-glow" id="specSpeedupVal">1.00x</span>
+                        </div>
+                        <div class="hud-item">
+                            <span class="hud-label">ACCEPTANCE (ALPHA):</span>
+                            <span class="hud-val" id="specAlphaVal">--%</span>
+                        </div>
+                        <div class="hud-item">
+                            <span class="hud-label">KV ROLLBACKS:</span>
+                            <span class="hud-val" id="specRollbackVal">0 slots</span>
+                        </div>
+                        <div class="hud-item">
+                            <span class="hud-label">TARGET PASSES:</span>
+                            <span class="hud-val" id="specPassesVal">0</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Output Terminal View -->
                 <div class="stream-terminal-container">
                     <div class="terminal-titlebar">
@@ -278,6 +326,10 @@
 
                     <div class="multi-stream-grid hidden" id="multiStreamGrid">
                         <!-- Dynamic multi-stream response cards -->
+                    </div>
+
+                    <div class="spec-tree-container hidden" id="speculativeTreeContainer">
+                        <!-- Dynamic SpecInfer candidate verification steps -->
                     </div>
                 </div>
             </section>

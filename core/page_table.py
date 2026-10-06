@@ -71,6 +71,44 @@ class PageTable:
         self.num_tokens += 1
         return physical_block_id, offset, is_new_block
 
+    def rollback_slots(
+        self,
+        num_slots: int,
+        allocator: BlockAllocator,
+        cpu_allocator: Optional[BlockAllocator] = None
+    ) -> List[int]:
+        """
+        Speculative Decoding KV-Cache Rollback:
+        Unwinds the sequence by `num_slots` tokens in O(1) time.
+        If the rollback crosses physical block boundaries, any abandoned physical blocks
+        are freed immediately back to the BlockAllocator without memory copying.
+        
+        Returns:
+            List of freed physical block IDs.
+        """
+        if num_slots <= 0:
+            return []
+        if num_slots > self.num_tokens:
+            raise ValueError(
+                f"Cannot rollback {num_slots} slots: sequence {self.seq_id} only has {self.num_tokens} tokens."
+            )
+
+        freed_block_ids: List[int] = []
+        target_tokens = self.num_tokens - num_slots
+        target_blocks = (target_tokens + self.block_size - 1) // self.block_size if target_tokens > 0 else 0
+
+        while len(self.logical_to_physical) > target_blocks:
+            abandoned_bid = self.logical_to_physical.pop()
+            tier = self.logical_to_tier.pop() if self.logical_to_tier else "GPU"
+            if tier == "CPU" and cpu_allocator is not None:
+                cpu_allocator.free(abandoned_bid)
+            else:
+                allocator.free(abandoned_bid)
+            freed_block_ids.append(abandoned_bid)
+
+        self.num_tokens = target_tokens
+        return freed_block_ids
+
     def assign_prefix_block(self, physical_block_id: int, allocator: BlockAllocator):
         """
         Assigns an existing physical block (from prefix cache) into this sequence's page table.

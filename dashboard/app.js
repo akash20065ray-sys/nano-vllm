@@ -952,40 +952,78 @@ function escapeHtml(str) {
 function initMultiPromptConsole() {
     const tabSingleMode = document.getElementById("tabSingleMode");
     const tabBatchMode = document.getElementById("tabBatchMode");
+    const tabSpecMode = document.getElementById("tabSpecMode");
+
     const singleContainer = document.getElementById("singlePromptContainer");
     const multiContainer = document.getElementById("multiPromptContainer");
+    const specContainer = document.getElementById("specPromptContainer");
+
     const terminalOutput = document.getElementById("terminalOutput");
     const multiStreamGrid = document.getElementById("multiStreamGrid");
+    const specTreeContainer = document.getElementById("speculativeTreeContainer");
     const autoregressiveInspector = document.getElementById("autoregressiveInspector");
 
-    if (tabSingleMode && tabBatchMode) {
+    function clearTypingPreview() {
+        state.blocks.forEach(b => {
+            if (b.status === "preview") {
+                b.status = "free";
+                b.tokensOccupied = 0;
+                updateBlockCell(b.id);
+            }
+        });
+    }
+
+    if (tabSingleMode) {
         tabSingleMode.addEventListener("click", () => {
             tabSingleMode.classList.add("active");
-            tabBatchMode.classList.remove("active");
+            if (tabBatchMode) tabBatchMode.classList.remove("active");
+            if (tabSpecMode) tabSpecMode.classList.remove("active");
+
             if (singleContainer) singleContainer.classList.remove("hidden");
             if (multiContainer) multiContainer.classList.add("hidden");
+            if (specContainer) specContainer.classList.add("hidden");
+
             if (terminalOutput) terminalOutput.classList.remove("hidden");
             if (multiStreamGrid) multiStreamGrid.classList.add("hidden");
+            if (specTreeContainer) specTreeContainer.classList.add("hidden");
             if (autoregressiveInspector) autoregressiveInspector.classList.remove("hidden");
             handlePromptTyping();
         });
+    }
 
+    if (tabBatchMode) {
         tabBatchMode.addEventListener("click", () => {
             tabBatchMode.classList.add("active");
-            tabSingleMode.classList.remove("active");
+            if (tabSingleMode) tabSingleMode.classList.remove("active");
+            if (tabSpecMode) tabSpecMode.classList.remove("active");
+
             if (singleContainer) singleContainer.classList.add("hidden");
             if (multiContainer) multiContainer.classList.remove("hidden");
+            if (specContainer) specContainer.classList.add("hidden");
+
             if (terminalOutput) terminalOutput.classList.add("hidden");
             if (multiStreamGrid) multiStreamGrid.classList.remove("hidden");
+            if (specTreeContainer) specTreeContainer.classList.add("hidden");
             if (autoregressiveInspector) autoregressiveInspector.classList.add("hidden");
-            // Clear preview blocks
-            state.blocks.forEach(b => {
-                if (b.status === "preview") {
-                    b.status = "free";
-                    b.tokensOccupied = 0;
-                    updateBlockCell(b.id);
-                }
-            });
+            clearTypingPreview();
+        });
+    }
+
+    if (tabSpecMode) {
+        tabSpecMode.addEventListener("click", () => {
+            tabSpecMode.classList.add("active");
+            if (tabSingleMode) tabSingleMode.classList.remove("active");
+            if (tabBatchMode) tabBatchMode.classList.remove("active");
+
+            if (singleContainer) singleContainer.classList.add("hidden");
+            if (multiContainer) multiContainer.classList.add("hidden");
+            if (specContainer) specContainer.classList.remove("hidden");
+
+            if (terminalOutput) terminalOutput.classList.add("hidden");
+            if (multiStreamGrid) multiStreamGrid.classList.add("hidden");
+            if (specTreeContainer) specTreeContainer.classList.remove("hidden");
+            if (autoregressiveInspector) autoregressiveInspector.classList.add("hidden");
+            clearTypingPreview();
         });
     }
 
@@ -1011,6 +1049,11 @@ function initMultiPromptConsole() {
     const btnRunConcurrentBatch = document.getElementById("btnRunConcurrentBatch");
     if (btnRunConcurrentBatch) {
         btnRunConcurrentBatch.addEventListener("click", runConcurrentBatchInDashboard);
+    }
+
+    const btnSubmitSpecPrompt = document.getElementById("btnSubmitSpecPrompt");
+    if (btnSubmitSpecPrompt) {
+        btnSubmitSpecPrompt.addEventListener("click", runSpecInferInDashboard);
     }
 
     renderMultiPromptList();
@@ -1332,4 +1375,186 @@ async function simulateConcurrentSequenceStream(stream) {
     renderDiagnosticsTable();
     updateTelemetryHUD();
 }
+
+// =========================================================================
+// SpecInfer: Speculative Acceleration Streaming Controller
+// =========================================================================
+
+async function runSpecInferInDashboard() {
+    if (state.isStreaming) return;
+
+    const input = document.getElementById("specPromptInput");
+    const kSelect = document.getElementById("specKSelect");
+    const promptText = (input ? input.value : "").trim();
+    if (!promptText) return;
+
+    const kVal = kSelect ? parseInt(kSelect.value, 10) : 4;
+    state.isStreaming = true;
+
+    const statusLabel = document.getElementById("terminalStatus");
+    const treeContainer = document.getElementById("speculativeTreeContainer");
+    const runBtn = document.getElementById("btnSubmitSpecPrompt");
+
+    if (runBtn) runBtn.disabled = true;
+    if (treeContainer) treeContainer.innerHTML = "";
+    if (statusLabel) statusLabel.innerText = `SpecInfer: Proposing K=${kVal} draft candidates & evaluating target verification...`;
+
+    // Clear typing preview blocks
+    state.blocks.forEach(b => {
+        if (b.status === "preview") {
+            b.status = "free";
+            b.tokensOccupied = 0;
+            updateBlockCell(b.id);
+        }
+    });
+
+    const seqId = state.activeSeqIdCounter++;
+    const req = {
+        seqId: seqId,
+        status: "RUNNING",
+        promptText: `[SpecInfer K=${kVal}] ` + promptText,
+        promptTokens: Math.ceil(promptText.length / 4),
+        generatedTokens: 0,
+        queueLatencyMs: 0.2,
+        ttftMs: 0.8,
+        meanItlMs: null,
+        prefixHit: false,
+        preempted: false,
+        allocatedBlocks: []
+    };
+    state.requests.unshift(req);
+    renderDiagnosticsTable();
+
+    try {
+        const response = await fetch("/api/speculative", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                prompt: promptText,
+                max_tokens: 36,
+                k_draft: kVal
+            })
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n\n");
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith("data: ")) continue;
+                let event;
+                try {
+                    event = JSON.parse(trimmed.slice(6));
+                } catch {
+                    continue;
+                }
+
+                if (event.type === "spec_start") {
+                    if (event.allocated_blocks) {
+                        event.allocated_blocks.forEach(bid => {
+                            if (bid >= 0 && bid < TOTAL_BLOCKS) {
+                                const b = state.blocks[bid];
+                                b.status = "active";
+                                b.seqId = seqId;
+                                b.tokensOccupied = currentBlockSize;
+                                if (!req.allocatedBlocks.includes(bid)) req.allocatedBlocks.push(bid);
+                                updateBlockCell(bid, true);
+                            }
+                        });
+                    }
+                } else if (event.type === "spec_step") {
+                    // Update Telemetry HUD
+                    const speedupEl = document.getElementById("specSpeedupVal");
+                    const alphaEl = document.getElementById("specAlphaVal");
+                    const rollbackEl = document.getElementById("specRollbackVal");
+                    const passesEl = document.getElementById("specPassesVal");
+
+                    if (speedupEl) speedupEl.innerText = event.speedup_ratio + "x";
+                    if (alphaEl) alphaEl.innerText = event.cumulative_alpha + "%";
+                    if (rollbackEl) rollbackEl.innerText = event.slots_rolled_back + " slots";
+                    if (passesEl) passesEl.innerText = event.step_index;
+
+                    // Update VRAM matrix blocks
+                    if (event.current_vram_blocks) {
+                        event.current_vram_blocks.forEach(bid => {
+                            if (bid >= 0 && bid < TOTAL_BLOCKS) {
+                                const b = state.blocks[bid];
+                                b.status = "active";
+                                b.seqId = seqId;
+                                if (!req.allocatedBlocks.includes(bid)) req.allocatedBlocks.push(bid);
+                                updateBlockCell(bid, true);
+                            }
+                        });
+                    }
+
+                    // Build step card in verification tree
+                    const card = document.createElement("div");
+                    card.className = "spec-step-card";
+
+                    const chipsHtml = event.candidates.map(c => {
+                        if (c.accepted) {
+                            return `<span class="spec-token-chip accepted">&#10003; "${escapeHtml(c.token)}" (P=${(c.target_prob * 100).toFixed(0)}%)</span>`;
+                        } else {
+                            return `<span class="spec-token-chip rejected">&#10007; "${escapeHtml(c.token)}" (P=${(c.target_prob * 100).toFixed(0)}%)</span>`;
+                        }
+                    }).join("");
+
+                    const rollbackHtml = event.slots_rolled_back > 0
+                        ? `<span class="spec-rollback-tag">&#8634; O(1) Rollback: ${event.slots_rolled_back} slots rewound</span>`
+                        : `<span class="hud-badge badge-hit">ALL DRAFT ACCEPTED + BONUS</span>`;
+
+                    card.innerHTML = `
+                        <div class="spec-step-header">
+                            <span class="spec-step-title">ITERATION STEP #${event.step_index}</span>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                ${rollbackHtml}
+                                <span class="spec-step-meta">${event.step_duration_ms}ms</span>
+                            </div>
+                        </div>
+                        <div class="spec-candidate-list">
+                            <span style="font-size:0.68rem; color:#64748b; font-family:var(--font-mono);">DRAFT CANDIDATES:</span>
+                            ${chipsHtml}
+                        </div>
+                        <div class="spec-emitted-summary">
+                            <strong>EMITTED:</strong> ${escapeHtml(event.emitted_words.join(" "))}
+                        </div>
+                    `;
+                    treeContainer.appendChild(card);
+                    treeContainer.scrollTop = treeContainer.scrollHeight;
+
+                    req.generatedTokens += event.emitted_words.length;
+                    renderDiagnosticsTable();
+                    updateTelemetryHUD();
+
+                } else if (event.type === "spec_done") {
+                    req.status = "COMPLETED";
+                    statusLabel.innerText = `SpecInfer Completed: ${event.total_tokens} tokens across ${event.target_forward_passes} target passes (${event.final_speedup}x speedup).`;
+                    document.getElementById("specSpeedupVal").innerText = event.final_speedup + "x";
+                    document.getElementById("specAlphaVal").innerText = event.final_acceptance_rate + "%";
+                    document.getElementById("specPassesVal").innerText = event.target_forward_passes;
+                    renderDiagnosticsTable();
+                    updateTelemetryHUD();
+                }
+            }
+        }
+    } catch (err) {
+        console.warn("SpecInfer streaming fallback or error:", err);
+        statusLabel.innerText = `SpecInfer Notice: ${err.message}`;
+    }
+
+    if (runBtn) runBtn.disabled = false;
+    state.isStreaming = false;
+}
+
 
